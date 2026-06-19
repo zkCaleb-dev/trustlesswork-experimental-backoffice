@@ -18,3 +18,12 @@ export async function bff<T>(path: string, init?: RequestInit): Promise<T> {
 
   return res.json() as Promise<T>;
 }
+
+/** Convenience for JSON POSTs to the BFF. */
+export async function bffPost<T>(path: string, data?: unknown): Promise<T> {
+  return bff<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: data !== undefined ? JSON.stringify(data) : undefined,
+  });
+}
