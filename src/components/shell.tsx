@@ -24,8 +24,17 @@ export function Shell({ children }: { children: ReactNode }) {
             <Link href="/" className="text-sm font-semibold tracking-tight">
               Trustless Work
             </Link>
-            <NavLink href="/escrows" active={pathname.startsWith('/escrows')}>
+            <NavLink
+              href="/escrows"
+              active={
+                pathname === '/escrows' ||
+                (pathname.startsWith('/escrows/') && pathname !== '/escrows/new')
+              }
+            >
               Escrows
+            </NavLink>
+            <NavLink href="/escrows/new" active={pathname === '/escrows/new'}>
+              New escrow
             </NavLink>
           </div>
           <div className="flex items-center gap-3 text-sm">
