@@ -6,6 +6,7 @@ import { useState, type ReactNode } from 'react';
 import { Shell } from '@/components/shell';
 import { useEscrows, type EscrowSummary } from '@/lib/escrows';
 import { assetSymbol, truncateMiddle } from '@/lib/format';
+import { useHasMounted } from '@/lib/use-has-mounted';
 import { useSession } from '@/lib/session';
 
 const STATUS_OPTIONS = [
@@ -18,6 +19,7 @@ const STATUS_OPTIONS = [
 ];
 
 export default function EscrowsPage() {
+  const mounted = useHasMounted();
   const session = useSession();
   const [status, setStatus] = useState('');
   const escrows = useEscrows(status ? { status } : {});
@@ -25,7 +27,9 @@ export default function EscrowsPage() {
 
   return (
     <Shell>
-      {!authed && !session.isLoading ? (
+      {!mounted ? (
+        <p className="text-sm text-neutral-500">Loading…</p>
+      ) : !authed && !session.isLoading ? (
         <SignInPrompt />
       ) : (
         <div className="flex flex-col gap-6">

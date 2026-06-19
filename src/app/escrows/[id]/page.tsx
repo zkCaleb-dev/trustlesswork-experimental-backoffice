@@ -13,11 +13,13 @@ import {
   type EscrowParticipant,
 } from '@/lib/escrows';
 import { assetSymbol, fmtDate, truncateMiddle } from '@/lib/format';
+import { useHasMounted } from '@/lib/use-has-mounted';
 import { useSession } from '@/lib/session';
 
 export default function EscrowDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const mounted = useHasMounted();
   const session = useSession();
   const query = useEscrow(id);
   const authed = session.data?.authenticated ?? false;
@@ -28,7 +30,7 @@ export default function EscrowDetailPage() {
         ← All escrows
       </Link>
 
-      {!authed && !session.isLoading && (
+      {mounted && !authed && !session.isLoading && (
         <p className="mt-6 text-sm text-neutral-600">
           Please{' '}
           <Link href="/login" className="font-medium underline">

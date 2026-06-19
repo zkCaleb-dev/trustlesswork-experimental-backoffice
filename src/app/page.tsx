@@ -7,6 +7,7 @@ import type { ReactNode } from 'react';
 import { bff } from '@/lib/api';
 import { publicEnv } from '@/lib/public-env';
 import { useLogout, useSession } from '@/lib/session';
+import { useHasMounted } from '@/lib/use-has-mounted';
 
 interface Health {
   bff: string;
@@ -15,6 +16,7 @@ interface Health {
 }
 
 export default function HomePage() {
+  const mounted = useHasMounted();
   const session = useSession();
   const logout = useLogout();
   const health = useQuery({
@@ -67,8 +69,10 @@ export default function HomePage() {
         <h2 className="mb-3 text-sm font-medium text-neutral-700">
           Core connection
         </h2>
-        {health.isLoading && <p className="text-sm text-neutral-500">Checking…</p>}
-        {health.data && (
+        {(!mounted || health.isLoading) && (
+          <p className="text-sm text-neutral-500">Checking…</p>
+        )}
+        {mounted && health.data && (
           <ul className="space-y-1 text-sm">
             <li>
               BFF: <Badge ok={health.data.bff === 'ok'}>{health.data.bff}</Badge>
@@ -94,7 +98,7 @@ export default function HomePage() {
 
       <section className="rounded-lg border border-neutral-200 bg-white p-5">
         <h2 className="mb-2 text-sm font-medium text-neutral-700">Your session</h2>
-        {session.isLoading ? (
+        {!mounted || session.isLoading ? (
           <p className="text-sm text-neutral-500">Checking…</p>
         ) : authed ? (
           <div className="flex flex-col gap-3 text-sm text-neutral-600">
@@ -127,7 +131,7 @@ export default function HomePage() {
       </section>
 
       <p className="text-xs text-neutral-400">
-        F2 — escrow read wired (list + detail). Escrow actions next.
+        F3 — escrow actions wired (fund / release / dispute). Create next.
       </p>
     </main>
   );
