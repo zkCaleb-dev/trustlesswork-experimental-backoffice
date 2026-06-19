@@ -12,6 +12,8 @@ export interface SessionUser {
 export interface SessionState {
   authenticated: boolean;
   user?: SessionUser;
+  /** The account's primary wallet address, for display. */
+  wallet?: string | null;
 }
 
 /** Reactive auth state, resolved server-side from the httpOnly cookie. */

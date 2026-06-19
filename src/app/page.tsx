@@ -24,6 +24,10 @@ export default function HomePage() {
 
   const authed = session.data?.authenticated ?? false;
   const user = session.data?.user;
+  const wallet = session.data?.wallet;
+  const who = wallet
+    ? formatAddress(wallet)
+    : (user?.email ?? `user #${user?.id}`);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 p-8">
@@ -37,8 +41,8 @@ export default function HomePage() {
         <div className="text-sm">
           {authed ? (
             <div className="flex items-center gap-3">
-              <span className="text-neutral-600">
-                {user?.email ?? `user #${user?.id}`}
+              <span className="text-neutral-600" title={wallet ?? undefined}>
+                {who}
               </span>
               <button
                 onClick={() => logout.mutate()}
@@ -93,13 +97,24 @@ export default function HomePage() {
         {session.isLoading ? (
           <p className="text-sm text-neutral-500">Checking…</p>
         ) : authed ? (
-          <p className="text-sm text-neutral-600">
-            Signed in as{' '}
-            <code className="rounded bg-neutral-100 px-1">
-              {user?.email ?? `user #${user?.id}`}
-            </code>
-            . Escrows &amp; admin coming in F2–F4.
-          </p>
+          <div className="flex flex-col gap-3 text-sm text-neutral-600">
+            <p>
+              Signed in with wallet{' '}
+              <code
+                className="rounded bg-neutral-100 px-1"
+                title={wallet ?? undefined}
+              >
+                {who}
+              </code>
+              .
+            </p>
+            <Link
+              href="/escrows"
+              className="inline-block w-fit rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+            >
+              View escrows →
+            </Link>
+          </div>
         ) : (
           <p className="text-sm text-neutral-600">
             Not signed in.{' '}
@@ -112,10 +127,17 @@ export default function HomePage() {
       </section>
 
       <p className="text-xs text-neutral-400">
-        F1 — wallet login wired (SEP-10 session). Escrows next.
+        F2 — escrow read wired (list + detail). Escrow actions next.
       </p>
     </main>
   );
+}
+
+/** `GABCDE…WXYZ` — short, readable form of a Stellar address. */
+function formatAddress(address: string): string {
+  return address.length > 12
+    ? `${address.slice(0, 6)}…${address.slice(-4)}`
+    : address;
 }
 
 function Badge({ ok, children }: { ok: boolean; children: ReactNode }) {
