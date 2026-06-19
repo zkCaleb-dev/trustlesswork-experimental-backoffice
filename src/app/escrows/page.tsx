@@ -9,21 +9,20 @@ import { assetSymbol, truncateMiddle } from '@/lib/format';
 import { useHasMounted } from '@/lib/use-has-mounted';
 import { useSession } from '@/lib/session';
 
-const STATUS_OPTIONS = [
-  '',
-  'ACTIVE',
-  'FUNDED',
-  'RELEASED',
-  'DISPUTED',
-  'RESOLVED',
-];
+const isStr = (s: string | null): s is string => s !== null && s !== '';
 
 export default function EscrowsPage() {
   const mounted = useHasMounted();
   const session = useSession();
   const [status, setStatus] = useState('');
-  const escrows = useEscrows(status ? { status } : {});
+  const escrows = useEscrows();
   const authed = session.data?.authenticated ?? false;
+
+  // Status values are derived from the actual data (the core stores them in its
+  // own vocabulary, e.g. lowercase "active"), so the filter always matches.
+  const all = escrows.data ?? [];
+  const statuses = [...new Set(all.map((e) => e.status).filter(isStr))].sort();
+  const filtered = status ? all.filter((e) => e.status === status) : all;
 
   return (
     <Shell>
@@ -45,11 +44,13 @@ export default function EscrowsPage() {
                 aria-label="Filter by status"
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
-                className="rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+                disabled={statuses.length === 0}
+                className="rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm disabled:opacity-50"
               >
-                {STATUS_OPTIONS.map((s) => (
+                <option value="">All statuses</option>
+                {statuses.map((s) => (
                   <option key={s} value={s}>
-                    {s || 'All statuses'}
+                    {s}
                   </option>
                 ))}
               </select>
@@ -67,10 +68,15 @@ export default function EscrowsPage() {
             <p className="text-sm text-neutral-500">Loading escrows…</p>
           )}
           {escrows.error && <ErrorBox error={escrows.error} />}
-          {escrows.data && escrows.data.length === 0 && <EmptyState />}
-          {escrows.data && escrows.data.length > 0 && (
+          {escrows.data && all.length === 0 && <EmptyState />}
+          {all.length > 0 && filtered.length === 0 && (
+            <p className="text-sm text-neutral-500">
+              No escrows match “{status}”.
+            </p>
+          )}
+          {filtered.length > 0 && (
             <ul className="grid gap-3 sm:grid-cols-2">
-              {escrows.data.map((e) => (
+              {filtered.map((e) => (
                 <EscrowCard key={e.id} escrow={e} />
               ))}
             </ul>
