@@ -1,0 +1,38 @@
+{
+  "name": "trustlesswork-experimental-backoffice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backoffice for Trustless Work v2 — talks only to the deployed core via a thin Next BFF.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@creit.tech/stellar-wallets-kit": "2.3.0",
+    "@tanstack/react-query": "^5.101.0",
+    "next": "^16.2.9",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.4.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "^16.2.9",
+    "prettier": "^3.4.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
