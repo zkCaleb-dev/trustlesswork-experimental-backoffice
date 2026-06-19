@@ -112,7 +112,7 @@ export default function HomePage() {
       </section>
 
       <p className="text-xs text-neutral-400">
-        F1 — onboarding wired (register / recover / sign in). Escrows next.
+        F1 — wallet login wired (SEP-10 session). Escrows next.
       </p>
     </main>
   );

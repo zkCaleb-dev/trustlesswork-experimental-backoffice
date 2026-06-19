@@ -24,51 +24,98 @@ interface IssuedKey {
   warning: string;
 }
 
-/** Shared wallet flow for register + recover: connect → challenge → sign → verify. */
-async function runWalletAuth(kind: 'register' | 'recover'): Promise<IssuedKey> {
+/**
+ * Wallet login (SEP-10): connect → challenge → sign → verify. The core returns
+ * a session token that the BFF stores in an httpOnly cookie; nothing sensitive
+ * reaches the browser. `address` is optional so a caller that already connected
+ * (e.g. right after register) can reuse it without a second wallet picker.
+ */
+async function establishSession(address?: string): Promise<void> {
+  const addr = address ?? (await connectWallet());
+  const challenge = await bffPost<Challenge>('/auth/session/challenge', {
+    address: addr,
+  });
+  const signedXdr = await signXdr(
+    challenge.xdr,
+    addr,
+    challenge.networkPassphrase,
+  );
+  await bffPost('/auth/session/verify', { address: addr, signedXdr });
+}
+
+/** Register/recover: connect → challenge → sign → verify → returns the key + address. */
+async function provision(
+  kind: 'register' | 'recover',
+): Promise<{ issued: IssuedKey; address: string }> {
   const address = await connectWallet();
-  const challenge = await bffPost<Challenge>(`/auth/${kind}/challenge`, { address });
+  const challenge = await bffPost<Challenge>(`/auth/${kind}/challenge`, {
+    address,
+  });
   const signedXdr = await signXdr(
     challenge.xdr,
     address,
     challenge.networkPassphrase,
   );
-  return bffPost<IssuedKey>(`/auth/${kind}/verify`, { address, signedXdr });
+  const issued = await bffPost<IssuedKey>(`/auth/${kind}/verify`, {
+    address,
+    signedXdr,
+  });
+  return { issued, address };
 }
 
 export default function LoginPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const session = useSession();
-  const [issuedKey, setIssuedKey] = useState<IssuedKey | null>(null);
+  const [provisioned, setProvisioned] = useState<{
+    issued: IssuedKey;
+    address: string;
+  } | null>(null);
 
   const finish = async () => {
     await qc.invalidateQueries({ queryKey: ['session'] });
     router.push('/');
   };
 
-  const register = useMutation({
-    mutationFn: () => runWalletAuth('register'),
-    onSuccess: setIssuedKey,
-  });
-  const recover = useMutation({
-    mutationFn: () => runWalletAuth('recover'),
-    onSuccess: setIssuedKey,
-  });
+  // Primary: existing users sign in with their wallet (one signature).
   const login = useMutation({
-    mutationFn: (apiKey: string) => bffPost('/auth/login', { apiKey }),
+    mutationFn: () => establishSession(),
     onSuccess: finish,
   });
 
-  if (issuedKey) {
-    return <ShowKeyOnce issued={issuedKey} onContinue={finish} />;
+  const register = useMutation({
+    mutationFn: () => provision('register'),
+    onSuccess: setProvisioned,
+  });
+  const recover = useMutation({
+    mutationFn: () => provision('recover'),
+    onSuccess: setProvisioned,
+  });
+
+  // After the register/recover key is shown, sign in with the same wallet.
+  const enter = useMutation({
+    mutationFn: (address: string) => establishSession(address),
+    onSuccess: finish,
+  });
+
+  if (provisioned) {
+    return (
+      <ShowKeyOnce
+        issued={provisioned.issued}
+        busy={enter.isPending}
+        error={enter.error}
+        onContinue={() => enter.mutate(provisioned.address)}
+      />
+    );
   }
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-5 p-8">
       <header>
         <h1 className="text-2xl font-semibold">Trustless Work Backoffice</h1>
-        <p className="text-sm text-neutral-500">Sign in or create an account.</p>
+        <p className="text-sm text-neutral-500">
+          Sign in with your Stellar wallet.
+        </p>
       </header>
 
       {session.data?.authenticated && (
@@ -81,11 +128,25 @@ export default function LoginPage() {
       )}
 
       <Card
-        title="New here? Register with your wallet"
-        desc="Prove ownership of your Stellar wallet (SEP-10) and get your API key."
+        title="Sign in"
+        desc="Prove ownership of your wallet (SEP-10). No passwords, no keys to paste."
       >
         <Button
           variant="primary"
+          loading={login.isPending}
+          onClick={() => login.mutate()}
+        >
+          Connect wallet &amp; sign in
+        </Button>
+        {login.error && <ErrorText error={login.error} />}
+      </Card>
+
+      <Card
+        title="New here? Create an account"
+        desc="Register your wallet and get an API key for programmatic access."
+      >
+        <Button
+          variant="secondary"
           loading={register.isPending}
           onClick={() => register.mutate()}
         >
@@ -94,33 +155,37 @@ export default function LoginPage() {
         {register.error && <ErrorText error={register.error} />}
       </Card>
 
-      <Card
-        title="Lost your key? Recover access"
-        desc="Re-prove your registered wallet to mint a fresh key."
-      >
-        <Button
-          variant="secondary"
-          loading={recover.isPending}
-          onClick={() => recover.mutate()}
-        >
-          Connect wallet &amp; recover
-        </Button>
-        {recover.error && <ErrorText error={recover.error} />}
-      </Card>
-
-      <Card title="Have an API key? Sign in" desc="Paste an existing key to sign in.">
-        <KeyForm loading={login.isPending} onSubmit={(k) => login.mutate(k)} />
-        {login.error && <ErrorText error={login.error} />}
-      </Card>
+      <details className="text-sm text-neutral-500">
+        <summary className="cursor-pointer select-none">
+          Lost your API key?
+        </summary>
+        <div className="mt-3 rounded-lg border border-neutral-200 bg-white p-5">
+          <p className="mb-3 text-xs text-neutral-500">
+            Re-prove your registered wallet to mint a fresh key.
+          </p>
+          <Button
+            variant="secondary"
+            loading={recover.isPending}
+            onClick={() => recover.mutate()}
+          >
+            Connect wallet &amp; recover
+          </Button>
+          {recover.error && <ErrorText error={recover.error} />}
+        </div>
+      </details>
     </main>
   );
 }
 
 function ShowKeyOnce({
   issued,
+  busy,
+  error,
   onContinue,
 }: {
   issued: IssuedKey;
+  busy: boolean;
+  error: Error | null;
   onContinue: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -140,46 +205,16 @@ function ShowKeyOnce({
         <Button variant="secondary" onClick={copy}>
           {copied ? 'Copied ✓' : 'Copy'}
         </Button>
-        <Button variant="primary" onClick={onContinue}>
-          I saved it — continue
+        <Button variant="primary" loading={busy} onClick={onContinue}>
+          I saved it — sign in
         </Button>
       </div>
+      {error && <ErrorText error={error} />}
       <p className="text-xs text-neutral-400">
-        You&apos;re already signed in (session cookie). This key is for using the
-        API elsewhere; it will never be shown again.
+        This key is for using the API elsewhere; it won&apos;t be shown again.
+        Continuing signs you into the backoffice with your wallet.
       </p>
     </main>
-  );
-}
-
-function KeyForm({
-  loading,
-  onSubmit,
-}: {
-  loading: boolean;
-  onSubmit: (apiKey: string) => void;
-}) {
-  const [value, setValue] = useState('');
-  return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (value.trim()) onSubmit(value.trim());
-      }}
-    >
-      <input
-        type="password"
-        autoComplete="off"
-        placeholder="id.secret"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        className="rounded-md border border-neutral-300 px-3 py-2 text-sm"
-      />
-      <Button variant="primary" type="submit" loading={loading}>
-        Sign in
-      </Button>
-    </form>
   );
 }
 

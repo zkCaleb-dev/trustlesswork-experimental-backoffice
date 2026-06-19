@@ -24,8 +24,10 @@ export interface CoreFetchOptions {
   method?: string;
   /** Serialized and sent as JSON. */
   body?: unknown;
-  /** Sent as `x-api-key` — the user key (from cookie) or the admin key (env). */
+  /** Sent as `x-api-key` — the server-only admin key (env), for admin calls. */
   apiKey?: string;
+  /** Sent as `Authorization: Bearer` — the user's wallet-session token (cookie). */
+  bearer?: string;
   headers?: Record<string, string>;
   cache?: RequestCache;
 }
@@ -43,6 +45,7 @@ export async function coreFetch<T = unknown>(
     method = 'GET',
     body,
     apiKey,
+    bearer,
     headers = {},
     cache = 'no-store',
   } = options;
@@ -54,6 +57,7 @@ export async function coreFetch<T = unknown>(
       Accept: 'application/json',
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(apiKey ? { 'x-api-key': apiKey } : {}),
+      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
       ...headers,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
