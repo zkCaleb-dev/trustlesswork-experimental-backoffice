@@ -10,6 +10,7 @@ type StellarWalletsKitClass =
   typeof import('@creit.tech/stellar-wallets-kit/sdk')['StellarWalletsKit'];
 
 let kitPromise: Promise<StellarWalletsKitClass> | null = null;
+let connectedAddress: string | null = null;
 
 async function getKit(): Promise<StellarWalletsKitClass> {
   if (!kitPromise) {
@@ -46,7 +47,17 @@ async function getKit(): Promise<StellarWalletsKitClass> {
 export async function connectWallet(): Promise<string> {
   const kit = await getKit();
   const { address } = await kit.authModal();
+  connectedAddress = address;
   return address;
+}
+
+/**
+ * Returns the connected wallet address, opening the picker only the first time
+ * (cached for the page session). Use before signing escrow actions so the user
+ * isn't asked to re-pick a wallet on every action.
+ */
+export async function ensureWallet(): Promise<string> {
+  return connectedAddress ?? connectWallet();
 }
 
 /** Signs an unsigned challenge/transaction XDR with the connected wallet. */
@@ -65,5 +76,6 @@ export async function signXdr(
 
 export async function disconnectWallet(): Promise<void> {
   const kit = await getKit();
+  connectedAddress = null;
   await kit.disconnect();
 }

@@ -2,8 +2,10 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
+import { Shell } from '@/components/shell';
+import { useEscrowAction } from '@/lib/escrow-actions';
 import {
   useEscrow,
   type EscrowDeposit,
@@ -18,47 +20,43 @@ export default function EscrowDetailPage() {
   const id = params.id;
   const session = useSession();
   const query = useEscrow(id);
+  const authed = session.data?.authenticated ?? false;
 
-  if (session.isLoading) return <Centered>Checking session…</Centered>;
-  if (!session.data?.authenticated) {
-    return (
-      <Centered>
-        <p className="text-sm text-neutral-600">
-          You need to{' '}
+  return (
+    <Shell>
+      <Link href="/escrows" className="text-sm text-neutral-500 hover:underline">
+        ← All escrows
+      </Link>
+
+      {!authed && !session.isLoading && (
+        <p className="mt-6 text-sm text-neutral-600">
+          Please{' '}
           <Link href="/login" className="font-medium underline">
             sign in
           </Link>
           .
         </p>
-      </Centered>
-    );
-  }
-
-  return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-8">
-      <Link href="/escrows" className="text-sm text-neutral-500 underline">
-        ← All escrows
-      </Link>
-
-      {query.isLoading && (
-        <p className="text-sm text-neutral-500">Loading escrow…</p>
       )}
 
-      {query.error && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+      {authed && query.isLoading && (
+        <p className="mt-6 text-sm text-neutral-500">Loading escrow…</p>
+      )}
+
+      {authed && query.error && (
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           This escrow doesn&apos;t exist, or it isn&apos;t in your access set.
         </div>
       )}
 
-      {query.data && (
-        <>
+      {authed && query.data && (
+        <div className="mt-6 flex flex-col gap-6">
           <header className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h1 className="text-2xl font-semibold">
+              <h1 className="text-2xl font-semibold tracking-tight">
                 {query.data.escrow.engagementId ?? 'Escrow'}
               </h1>
               <p
-                className="text-xs text-neutral-500"
+                className="mt-1 font-mono text-xs text-neutral-500"
                 title={query.data.escrow.contractId}
               >
                 {query.data.escrow.contractType ?? 'unknown'} ·{' '}
@@ -69,7 +67,7 @@ export default function EscrowDetailPage() {
           </header>
 
           <Section title="Details">
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
               <Field label="Network" value={query.data.escrow.network} />
               <Field
                 label="Amount"
@@ -99,6 +97,14 @@ export default function EscrowDetailPage() {
                 value={fmtDate(query.data.escrow.updatedAt)}
               />
             </dl>
+          </Section>
+
+          <Section title="Actions">
+            <ActionsPanel
+              escrowId={id}
+              contractId={query.data.escrow.contractId}
+              contractType={query.data.escrow.contractType}
+            />
           </Section>
 
           <Section title={`Participants (${query.data.participants.length})`}>
@@ -138,18 +144,181 @@ export default function EscrowDetailPage() {
           </Section>
 
           {query.data.escrow.snapshot && (
-            <details className="rounded-lg border border-neutral-200 bg-white p-4">
+            <details className="rounded-xl border border-neutral-200 bg-white p-4">
               <summary className="cursor-pointer select-none text-sm font-medium text-neutral-700">
                 Raw snapshot
               </summary>
-              <pre className="mt-3 max-h-96 overflow-auto rounded bg-neutral-50 p-3 text-xs">
+              <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-neutral-50 p-3 text-xs">
                 {JSON.stringify(query.data.escrow.snapshot, null, 2)}
               </pre>
             </details>
           )}
-        </>
+        </div>
       )}
-    </main>
+    </Shell>
+  );
+}
+
+function ActionsPanel({
+  escrowId,
+  contractId,
+  contractType,
+}: {
+  escrowId: string;
+  contractId: string;
+  contractType: string | null;
+}) {
+  const action = useEscrowAction(escrowId);
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+
+  if (contractType !== 'single-release-v2') {
+    return (
+      <Empty>
+        On-chain actions for “{contractType ?? 'unknown'}” escrows are coming
+        soon. (Single-release v2 is supported.)
+      </Empty>
+    );
+  }
+
+  const base = '/escrow/single-release/v2';
+  const busy = action.isPending;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-neutral-500">
+        Each action builds an unsigned transaction, you approve it in your
+        wallet, and it&apos;s submitted on-chain. You must use a wallet with the
+        right role for the action.
+      </p>
+
+      {/* Fund */}
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-neutral-400">Amount to fund</span>
+          <input
+            value={amount}
+            inputMode="decimal"
+            placeholder="100"
+            onChange={(e) => setAmount(e.target.value)}
+            className="w-32 rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
+          />
+        </label>
+        <ActionButton
+          disabled={busy || !amount || Number(amount) <= 0}
+          onClick={() =>
+            action.mutate(
+              {
+                buildPath: `${base}/fund`,
+                bodyFor: (signer) => ({
+                  contractId,
+                  signer,
+                  amount: Number(amount),
+                }),
+              },
+              { onSuccess: () => setAmount('') },
+            )
+          }
+        >
+          Fund
+        </ActionButton>
+
+        <div className="ml-auto" />
+
+        <ActionButton
+          variant="primary"
+          disabled={busy}
+          onClick={() =>
+            action.mutate({
+              buildPath: `${base}/release-funds`,
+              bodyFor: (signer) => ({ contractId, releaseSigner: signer }),
+            })
+          }
+        >
+          Release funds
+        </ActionButton>
+      </div>
+
+      {/* Dispute */}
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="text-xs text-neutral-400">Dispute reason</span>
+          <input
+            value={reason}
+            maxLength={500}
+            placeholder="Why are you opening a dispute?"
+            onChange={(e) => setReason(e.target.value)}
+            className="w-full rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
+          />
+        </label>
+        <ActionButton
+          variant="danger"
+          disabled={busy || !reason.trim()}
+          onClick={() =>
+            action.mutate(
+              {
+                buildPath: `${base}/dispute`,
+                bodyFor: (signer) => ({ contractId, signer, reason }),
+              },
+              { onSuccess: () => setReason('') },
+            )
+          }
+        >
+          Open dispute
+        </ActionButton>
+      </div>
+
+      {action.isPending && (
+        <p className="text-xs text-neutral-500">
+          Building, signing &amp; submitting — approve the transaction in your
+          wallet…
+        </p>
+      )}
+      {action.error && (
+        <p className="text-xs text-red-600">
+          {action.error instanceof Error
+            ? action.error.message
+            : 'The action failed.'}
+        </p>
+      )}
+      {action.isSuccess && (
+        <p className="text-xs text-green-700">
+          Submitted ✓
+          {action.data?.txHash
+            ? ` · tx ${truncateMiddle(action.data.txHash)}`
+            : ''}
+          . The escrow updates shortly (indexer) — hit refresh on the list.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ActionButton({
+  children,
+  onClick,
+  disabled,
+  variant = 'secondary',
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  variant?: 'primary' | 'secondary' | 'danger';
+}) {
+  const styles =
+    variant === 'primary'
+      ? 'bg-neutral-900 text-white hover:bg-neutral-800'
+      : variant === 'danger'
+        ? 'border border-red-300 text-red-700 hover:bg-red-50'
+        : 'border border-neutral-300 text-neutral-800 hover:bg-neutral-50';
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${styles}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -171,28 +340,30 @@ function ParticipantRow({ p }: { p: EscrowParticipant }) {
 
 function DepositRow({ d }: { d: EscrowDeposit }) {
   return (
-    <li className="flex items-center justify-between py-2">
+    <li className="flex items-center justify-between gap-3 py-2">
       <span className="font-mono text-xs text-neutral-700" title={d.fromAddress}>
         {truncateMiddle(d.fromAddress)}
       </span>
       <span className="text-neutral-700">
         {d.amount} {assetSymbol(d.asset)}
       </span>
-      <span className="text-xs text-neutral-400">{fmtDate(d.ledgerClosedAt)}</span>
+      <span className="text-xs text-neutral-400">
+        {fmtDate(d.ledgerClosedAt)}
+      </span>
     </li>
   );
 }
 
 function EventRow({ e }: { e: EscrowEvent }) {
   return (
-    <li className="rounded-md border border-neutral-100 bg-white p-3">
+    <li className="rounded-lg border border-neutral-100 bg-white p-3">
       <div className="flex items-center justify-between">
         <span className="font-medium text-neutral-800">{e.kind}</span>
         <span className="text-xs text-neutral-400">
           {fmtDate(e.ledgerClosedAt)}
         </span>
       </div>
-      <div className="mt-1 flex items-center gap-3 text-xs text-neutral-500">
+      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-neutral-500">
         <span>ledger {e.ledgerSeq}</span>
         {e.actor && (
           <span className="font-mono" title={e.actor}>
@@ -211,7 +382,7 @@ function EventRow({ e }: { e: EscrowEvent }) {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-5">
+    <section className="rounded-xl border border-neutral-200 bg-white p-5">
       <h2 className="mb-3 text-sm font-medium text-neutral-700">{title}</h2>
       {children}
     </section>
@@ -233,7 +404,7 @@ function Field({
     <div>
       <dt className="text-xs text-neutral-400">{label}</dt>
       <dd
-        className={`text-neutral-800 ${mono ? 'font-mono text-xs' : ''}`}
+        className={`text-neutral-800 ${mono ? 'truncate font-mono text-xs' : ''}`}
         title={title}
       >
         {value}
@@ -253,7 +424,9 @@ function Badge({ status }: { status: string | null }) {
           ? 'bg-blue-100 text-blue-800'
           : 'bg-neutral-100 text-neutral-600';
   return (
-    <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${tone}`}>
+    <span
+      className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${tone}`}
+    >
       {label}
     </span>
   );
@@ -261,12 +434,4 @@ function Badge({ status }: { status: string | null }) {
 
 function Empty({ children }: { children: ReactNode }) {
   return <p className="text-sm text-neutral-400">{children}</p>;
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 p-8">
-      {children}
-    </main>
-  );
 }
