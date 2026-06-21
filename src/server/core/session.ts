@@ -6,8 +6,8 @@ import { cookies } from 'next/headers';
 
 import { serverEnv } from '@/server/env';
 
-/** Fallback cookie lifetime; matches the core's default session TTL. */
-const DEFAULT_MAX_AGE = 60 * 60 * 24;
+/** Fallback cookie lifetime; matches the core's default session TTL (2h). */
+const DEFAULT_MAX_AGE = 60 * 60 * 2;
 
 /** AES-256 key derived from SESSION_SECRET (any length → 32 bytes). */
 const KEY = crypto.createHash('sha256').update(serverEnv.SESSION_SECRET).digest();
