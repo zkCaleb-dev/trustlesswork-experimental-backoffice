@@ -36,6 +36,9 @@ export function Shell({ children }: { children: ReactNode }) {
             <NavLink href="/escrows/new" active={pathname === '/escrows/new'}>
               New escrow
             </NavLink>
+            <NavLink href="/settings" active={pathname === '/settings'}>
+              Settings
+            </NavLink>
           </div>
           <div className="flex items-center gap-3 text-sm">
             <span className="hidden text-xs text-neutral-400 sm:inline">
