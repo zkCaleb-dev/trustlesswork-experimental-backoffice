@@ -24,6 +24,7 @@ import {
   type ActionInput,
   type ActionValues,
   type DistributionRow,
+  type StatusUpdateRow,
   type EscrowActionDef,
   type EscrowKind,
   type EscrowStatus,
@@ -341,7 +342,8 @@ function ActionRow({
   myRoles: Set<string>;
 }) {
   const [values, setValues] = useState<ActionValues>(() => initialValues(def));
-  const roleOk = !def.requiredRole || myRoles.has(def.requiredRole);
+  const roleOk =
+    !def.requiredRoles || def.requiredRoles.every((r) => myRoles.has(r));
   const ready = def.isReady ? def.isReady(values) : true;
 
   const submit = () =>
@@ -357,9 +359,9 @@ function ActionRow({
     <div className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{def.label}</span>
-        {def.requiredRole && (
+        {def.requiredRoles && (
           <span className="text-xs text-muted-foreground">
-            signs as {roleLabel(def.requiredRole)}
+            signs as {def.requiredRoles.map(roleLabel).join(' + ')}
           </span>
         )}
       </div>
@@ -379,9 +381,10 @@ function ActionRow({
         >
           {def.label}
         </Button>
-        {!roleOk && def.requiredRole && (
+        {!roleOk && def.requiredRoles && (
           <span className="text-xs text-muted-foreground">
-            Connect the {roleLabel(def.requiredRole)} wallet to do this.
+            Connect a wallet with role:{' '}
+            {def.requiredRoles.map(roleLabel).join(' + ')}.
           </span>
         )}
       </div>
@@ -426,7 +429,93 @@ function ActionInputField({
     );
   }
 
-  const rows = Array.isArray(value) ? value : [];
+  if (input.kind === 'indexes') {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Label>{input.label}</Label>
+        <Input
+          value={typeof value === 'string' ? value : ''}
+          placeholder={input.placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-48"
+        />
+      </div>
+    );
+  }
+  if (input.kind === 'statusUpdates') {
+    const rows = (Array.isArray(value) ? value : []) as StatusUpdateRow[];
+    return (
+      <div className="flex flex-col gap-2">
+        <Label>{input.label}</Label>
+        {rows.map((row, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            <Input
+              value={row.index}
+              inputMode="numeric"
+              placeholder="index"
+              className="w-20"
+              onChange={(e) =>
+                onChange(
+                  rows.map((r, j) =>
+                    j === i ? { ...r, index: e.target.value } : r,
+                  ),
+                )
+              }
+            />
+            <Input
+              value={row.status}
+              placeholder="status (e.g. completed)"
+              className="min-w-0 flex-1"
+              onChange={(e) =>
+                onChange(
+                  rows.map((r, j) =>
+                    j === i ? { ...r, status: e.target.value } : r,
+                  ),
+                )
+              }
+            />
+            <Input
+              value={row.evidence}
+              placeholder="evidence (optional)"
+              className="min-w-0 flex-1"
+              onChange={(e) =>
+                onChange(
+                  rows.map((r, j) =>
+                    j === i ? { ...r, evidence: e.target.value } : r,
+                  ),
+                )
+              }
+            />
+            {rows.length > 1 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Remove update"
+                onClick={() => onChange(rows.filter((_, j) => j !== i))}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            )}
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="w-fit text-muted-foreground"
+          onClick={() =>
+            onChange([...rows, { index: '', status: '', evidence: '' }])
+          }
+        >
+          <Plus className="size-4" />
+          Add milestone update
+        </Button>
+      </div>
+    );
+  }
+
+  const rows = (Array.isArray(value) ? value : []) as DistributionRow[];
   return (
     <div className="flex flex-col gap-2">
       <Label>{input.label}</Label>

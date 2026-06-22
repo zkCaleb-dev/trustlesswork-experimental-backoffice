@@ -2,9 +2,9 @@
  * Declarative registry of on-chain escrow actions.
  *
  * Each action declares which escrow kind it applies to, the lifecycle states
- * it is offered in, the participant role that must sign it, its input fields,
- * and how to build the request body. The ActionsPanel renders this — adding an
- * action is a data change here, not new UI.
+ * it is offered in, the participant role(s) that must sign it, its input
+ * fields, and how to build the request body. The ActionsPanel renders this —
+ * adding an action is a data change here, not new UI.
  *
  * The read-model exposes contractType as the FLAVOR only (single-release /
  * multi-release), never the version. The version is derived from the snapshot
@@ -36,8 +36,17 @@ export interface DistributionRow {
   amount: string;
 }
 
-/** Per-action form state (string for scalars, rows for distributions). */
-export type ActionValues = Record<string, string | DistributionRow[]>;
+export interface StatusUpdateRow {
+  index: string;
+  status: string;
+  evidence: string;
+}
+
+/** Per-action form state (string scalars, or rows for composite inputs). */
+export type ActionValues = Record<
+  string,
+  string | DistributionRow[] | StatusUpdateRow[]
+>;
 
 export type ActionInput =
   | { kind: 'amount'; name: string; label: string; placeholder?: string }
@@ -48,7 +57,9 @@ export type ActionInput =
       placeholder?: string;
       maxLength?: number;
     }
-  | { kind: 'distributions'; name: string; label: string };
+  | { kind: 'indexes'; name: string; label: string; placeholder?: string }
+  | { kind: 'distributions'; name: string; label: string }
+  | { kind: 'statusUpdates'; name: string; label: string };
 
 export interface BuildContext {
   contractId: string;
@@ -64,11 +75,12 @@ export interface EscrowActionDef {
   /** Lifecycle states the action is offered in (omit = any state). */
   states?: EscrowStatus[];
   /**
-   * Participant role that must sign. Used to (a) gate by the connected
-   * wallet's roles and (b) tell the user which wallet to connect. Omit for
-   * actions anyone can call (e.g. fund, open dispute).
+   * Participant role(s) that must sign. ALL listed roles are required (e.g.
+   * approve-and-release needs approver AND release_signer). Used to gate by
+   * the connected wallet's roles and to tell the user which wallet to use.
+   * Omit for actions anyone can call (e.g. fund, open dispute).
    */
-  requiredRole?: ParticipantRole;
+  requiredRoles?: ParticipantRole[];
   tone?: 'default' | 'secondary' | 'destructive';
   inputs?: ActionInput[];
   /** Endpoint that builds the unsigned tx, per kind. */
@@ -77,6 +89,22 @@ export interface EscrowActionDef {
   isReady?: (values: ActionValues) => boolean;
   /** Assembles the request body sent to the build endpoint. */
   buildBody: (ctx: BuildContext) => Record<string, unknown>;
+}
+
+// ── value helpers ───────────────────────────────────────────────────────────
+
+/** Narrows a form value to a row array of the expected shape. */
+function rowsOf<T>(value: ActionValues[string] | undefined): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+/** Parses a comma-separated index field into a clean list of u32 indexes. */
+function toIndexes(value: ActionValues[string] | undefined): number[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 0);
 }
 
 // ── kind / role derivation ──────────────────────────────────────────────────
@@ -130,8 +158,13 @@ export function roleLabel(role: ParticipantRole): string {
 export function initialValues(def: EscrowActionDef): ActionValues {
   const out: ActionValues = {};
   for (const input of def.inputs ?? []) {
-    out[input.name] =
-      input.kind === 'distributions' ? [{ address: '', amount: '' }] : '';
+    if (input.kind === 'distributions') {
+      out[input.name] = [{ address: '', amount: '' }];
+    } else if (input.kind === 'statusUpdates') {
+      out[input.name] = [{ index: '', status: '', evidence: '' }];
+    } else {
+      out[input.name] = '';
+    }
   }
   return out;
 }
@@ -161,12 +194,88 @@ const SINGLE_RELEASE_V2: EscrowActionDef[] = [
     label: 'Release funds',
     kinds: ['single-release-v2'],
     states: ['active'],
-    requiredRole: 'release_signer',
+    requiredRoles: ['release_signer'],
     tone: 'secondary',
     path: () => '/escrow/single-release/v2/release-funds',
     buildBody: ({ contractId, signer }) => ({
       contractId,
       releaseSigner: signer,
+    }),
+  },
+  {
+    key: 'approve-milestones',
+    label: 'Approve milestones',
+    kinds: ['single-release-v2'],
+    states: ['active'],
+    requiredRoles: ['approver'],
+    tone: 'default',
+    inputs: [
+      {
+        kind: 'indexes',
+        name: 'milestoneIndexes',
+        label: 'Milestone indexes (comma-separated, 0-based)',
+        placeholder: '0, 1',
+      },
+    ],
+    path: () => '/escrow/single-release/v2/approve-milestones',
+    isReady: (v) => toIndexes(v.milestoneIndexes).length > 0,
+    buildBody: ({ contractId, signer, values }) => ({
+      contractId,
+      approver: signer,
+      milestoneIndexes: toIndexes(values.milestoneIndexes),
+    }),
+  },
+  {
+    key: 'approve-and-release',
+    label: 'Approve & release',
+    kinds: ['single-release-v2'],
+    states: ['active'],
+    requiredRoles: ['approver', 'release_signer'],
+    tone: 'secondary',
+    inputs: [
+      {
+        kind: 'indexes',
+        name: 'milestoneIndexes',
+        label: 'Milestone indexes to approve (comma-separated, 0-based)',
+        placeholder: '0, 1',
+      },
+    ],
+    path: () => '/escrow/single-release/v2/approve-and-release-milestones',
+    isReady: (v) => toIndexes(v.milestoneIndexes).length > 0,
+    buildBody: ({ contractId, signer, values }) => ({
+      contractId,
+      signer,
+      milestoneIndexes: toIndexes(values.milestoneIndexes),
+    }),
+  },
+  {
+    key: 'change-milestone-status',
+    label: 'Update milestone status',
+    kinds: ['single-release-v2'],
+    states: ['active'],
+    requiredRoles: ['service_provider'],
+    tone: 'secondary',
+    inputs: [
+      { kind: 'statusUpdates', name: 'updates', label: 'Milestone status updates' },
+    ],
+    path: () => '/escrow/single-release/v2/change-milestone-status',
+    isReady: (v) => {
+      const rows = rowsOf<StatusUpdateRow>(v.updates);
+      return (
+        rows.length > 0 &&
+        rows.every((r) => r.index.trim() !== '' && r.status.trim() !== '')
+      );
+    },
+    buildBody: ({ contractId, signer, values }) => ({
+      contractId,
+      serviceProvider: signer,
+      updates: rowsOf<StatusUpdateRow>(values.updates)
+        .filter((r) => r.index.trim() !== '')
+        .map((r) => ({
+          index: Number(r.index),
+          newStatus: r.status.trim(),
+          ...(r.evidence.trim() ? { newEvidence: r.evidence.trim() } : {}),
+        })),
     }),
   },
   {
@@ -197,7 +306,7 @@ const SINGLE_RELEASE_V2: EscrowActionDef[] = [
     label: 'Resolve dispute',
     kinds: ['single-release-v2'],
     states: ['disputed'],
-    requiredRole: 'dispute_resolver',
+    requiredRoles: ['dispute_resolver'],
     tone: 'default',
     inputs: [
       {
@@ -207,19 +316,74 @@ const SINGLE_RELEASE_V2: EscrowActionDef[] = [
       },
     ],
     path: () => '/escrow/single-release/v2/resolve-dispute',
-    isReady: (v) =>
-      Array.isArray(v.distributions) &&
-      v.distributions.length > 0 &&
-      v.distributions.every(
-        (d) => d.address.trim().length > 0 && Number(d.amount) >= 0,
-      ),
+    isReady: (v) => {
+      const rows = rowsOf<DistributionRow>(v.distributions);
+      return (
+        rows.length > 0 &&
+        rows.every((d) => d.address.trim() !== '' && Number(d.amount) >= 0)
+      );
+    },
     buildBody: ({ contractId, signer, values }) => ({
       contractId,
       disputeResolver: signer,
-      distributions: (values.distributions as DistributionRow[]).map((d) => ({
+      distributions: rowsOf<DistributionRow>(values.distributions).map((d) => ({
         address: d.address.trim(),
         amount: Number(d.amount),
       })),
+    }),
+  },
+  {
+    key: 'withdraw-remaining',
+    label: 'Withdraw remaining',
+    kinds: ['single-release-v2'],
+    states: ['released', 'disputed'],
+    requiredRoles: ['dispute_resolver'],
+    tone: 'secondary',
+    inputs: [
+      {
+        kind: 'distributions',
+        name: 'distributions',
+        label: 'Distribution of the remaining balance',
+      },
+    ],
+    path: () => '/escrow/single-release/v2/withdraw-remaining-funds',
+    isReady: (v) => {
+      const rows = rowsOf<DistributionRow>(v.distributions);
+      return (
+        rows.length > 0 &&
+        rows.every((d) => d.address.trim() !== '' && Number(d.amount) >= 0)
+      );
+    },
+    buildBody: ({ contractId, signer, values }) => ({
+      contractId,
+      disputeResolver: signer,
+      distributions: rowsOf<DistributionRow>(values.distributions).map((d) => ({
+        address: d.address.trim(),
+        amount: Number(d.amount),
+      })),
+    }),
+  },
+  {
+    key: 'extend-ttl',
+    label: 'Extend TTL',
+    kinds: ['single-release-v2'],
+    states: ['active'],
+    requiredRoles: ['admin'],
+    tone: 'secondary',
+    inputs: [
+      {
+        kind: 'amount',
+        name: 'ledgers',
+        label: 'Ledgers to extend',
+        placeholder: '100000',
+      },
+    ],
+    path: () => '/escrow/single-release/v2/extend-ttl',
+    isReady: (v) => Number.isInteger(Number(v.ledgers)) && Number(v.ledgers) >= 1,
+    buildBody: ({ contractId, signer, values }) => ({
+      contractId,
+      admin: signer,
+      ledgersToExtend: Number(values.ledgers),
     }),
   },
 ];
