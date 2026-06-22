@@ -9,6 +9,11 @@
  * The read-model exposes contractType as the FLAVOR only (single-release /
  * multi-release), never the version. The version is derived from the snapshot
  * shape: v2 carries role lists (roles.approvers[]), v1 a single roles.approver.
+ *
+ * single-release-v2 and multi-release-v2 share the same action set; the ONLY
+ * difference is that multi-release operates per-milestone, so release, dispute
+ * and resolve-dispute additionally take `milestoneIndexes[]` (and dispute is a
+ * different endpoint). That invariant lives in `v2Actions()` below.
  */
 
 export type EscrowKind =
@@ -169,226 +174,237 @@ export function initialValues(def: EscrowActionDef): ActionValues {
   return out;
 }
 
+// ── shared inputs & body helpers ──────────────────────────────────────────────
+
+const MILESTONE_INDEXES_INPUT: ActionInput = {
+  kind: 'indexes',
+  name: 'milestoneIndexes',
+  label: 'Milestone indexes (comma-separated, 0-based)',
+  placeholder: '0, 1',
+};
+
+const REASON_INPUT: ActionInput = {
+  kind: 'text',
+  name: 'reason',
+  label: 'Dispute reason',
+  placeholder: 'Why are you opening a dispute?',
+  maxLength: 500,
+};
+
+const distributionsInput = (label: string): ActionInput => ({
+  kind: 'distributions',
+  name: 'distributions',
+  label,
+});
+
+const indexesReady = (v: ActionValues): boolean =>
+  toIndexes(v.milestoneIndexes).length > 0;
+
+const distributionsReady = (v: ActionValues): boolean => {
+  const rows = rowsOf<DistributionRow>(v.distributions);
+  return (
+    rows.length > 0 &&
+    rows.every((d) => d.address.trim() !== '' && Number(d.amount) >= 0)
+  );
+};
+
+const distributionsBody = (values: ActionValues) =>
+  rowsOf<DistributionRow>(values.distributions).map((d) => ({
+    address: d.address.trim(),
+    amount: Number(d.amount),
+  }));
+
 // ── registry ──────────────────────────────────────────────────────────────
 
-const SINGLE_RELEASE_V2: EscrowActionDef[] = [
-  {
-    key: 'fund',
-    label: 'Fund',
-    kinds: ['single-release-v2'],
-    states: ['active'],
-    tone: 'default',
-    inputs: [
-      { kind: 'amount', name: 'amount', label: 'Amount to fund', placeholder: '100' },
-    ],
-    path: () => '/escrow/single-release/v2/fund',
-    isReady: (v) => Number(v.amount) > 0,
-    buildBody: ({ contractId, signer, values }) => ({
-      contractId,
-      signer,
-      amount: Number(values.amount),
-    }),
-  },
-  {
-    key: 'release',
-    label: 'Release funds',
-    kinds: ['single-release-v2'],
-    states: ['active'],
-    requiredRoles: ['release_signer'],
-    tone: 'secondary',
-    path: () => '/escrow/single-release/v2/release-funds',
-    buildBody: ({ contractId, signer }) => ({
-      contractId,
-      releaseSigner: signer,
-    }),
-  },
-  {
-    key: 'approve-milestones',
-    label: 'Approve milestones',
-    kinds: ['single-release-v2'],
-    states: ['active'],
-    requiredRoles: ['approver'],
-    tone: 'default',
-    inputs: [
-      {
-        kind: 'indexes',
-        name: 'milestoneIndexes',
-        label: 'Milestone indexes (comma-separated, 0-based)',
-        placeholder: '0, 1',
-      },
-    ],
-    path: () => '/escrow/single-release/v2/approve-milestones',
-    isReady: (v) => toIndexes(v.milestoneIndexes).length > 0,
-    buildBody: ({ contractId, signer, values }) => ({
-      contractId,
-      approver: signer,
-      milestoneIndexes: toIndexes(values.milestoneIndexes),
-    }),
-  },
-  {
-    key: 'approve-and-release',
-    label: 'Approve & release',
-    kinds: ['single-release-v2'],
-    states: ['active'],
-    requiredRoles: ['approver', 'release_signer'],
-    tone: 'secondary',
-    inputs: [
-      {
-        kind: 'indexes',
-        name: 'milestoneIndexes',
-        label: 'Milestone indexes to approve (comma-separated, 0-based)',
-        placeholder: '0, 1',
-      },
-    ],
-    path: () => '/escrow/single-release/v2/approve-and-release-milestones',
-    isReady: (v) => toIndexes(v.milestoneIndexes).length > 0,
-    buildBody: ({ contractId, signer, values }) => ({
-      contractId,
-      signer,
-      milestoneIndexes: toIndexes(values.milestoneIndexes),
-    }),
-  },
-  {
-    key: 'change-milestone-status',
-    label: 'Update milestone status',
-    kinds: ['single-release-v2'],
-    states: ['active'],
-    requiredRoles: ['service_provider'],
-    tone: 'secondary',
-    inputs: [
-      { kind: 'statusUpdates', name: 'updates', label: 'Milestone status updates' },
-    ],
-    path: () => '/escrow/single-release/v2/change-milestone-status',
-    isReady: (v) => {
-      const rows = rowsOf<StatusUpdateRow>(v.updates);
-      return (
-        rows.length > 0 &&
-        rows.every((r) => r.index.trim() !== '' && r.status.trim() !== '')
-      );
-    },
-    buildBody: ({ contractId, signer, values }) => ({
-      contractId,
-      serviceProvider: signer,
-      updates: rowsOf<StatusUpdateRow>(values.updates)
-        .filter((r) => r.index.trim() !== '')
-        .map((r) => ({
-          index: Number(r.index),
-          newStatus: r.status.trim(),
-          ...(r.evidence.trim() ? { newEvidence: r.evidence.trim() } : {}),
-        })),
-    }),
-  },
-  {
-    key: 'dispute',
-    label: 'Open dispute',
-    kinds: ['single-release-v2'],
-    states: ['active'],
-    tone: 'destructive',
-    inputs: [
-      {
-        kind: 'text',
-        name: 'reason',
-        label: 'Dispute reason',
-        placeholder: 'Why are you opening a dispute?',
-        maxLength: 500,
-      },
-    ],
-    path: () => '/escrow/single-release/v2/dispute',
-    isReady: (v) => typeof v.reason === 'string' && v.reason.trim().length > 0,
-    buildBody: ({ contractId, signer, values }) => ({
-      contractId,
-      signer,
-      reason: (values.reason as string).trim(),
-    }),
-  },
-  {
-    key: 'resolve-dispute',
-    label: 'Resolve dispute',
-    kinds: ['single-release-v2'],
-    states: ['disputed'],
-    requiredRoles: ['dispute_resolver'],
-    tone: 'default',
-    inputs: [
-      {
-        kind: 'distributions',
-        name: 'distributions',
-        label: 'Distribution — the sum must equal the escrow balance',
-      },
-    ],
-    path: () => '/escrow/single-release/v2/resolve-dispute',
-    isReady: (v) => {
-      const rows = rowsOf<DistributionRow>(v.distributions);
-      return (
-        rows.length > 0 &&
-        rows.every((d) => d.address.trim() !== '' && Number(d.amount) >= 0)
-      );
-    },
-    buildBody: ({ contractId, signer, values }) => ({
-      contractId,
-      disputeResolver: signer,
-      distributions: rowsOf<DistributionRow>(values.distributions).map((d) => ({
-        address: d.address.trim(),
-        amount: Number(d.amount),
-      })),
-    }),
-  },
-  {
-    key: 'withdraw-remaining',
-    label: 'Withdraw remaining',
-    kinds: ['single-release-v2'],
-    states: ['released', 'disputed'],
-    requiredRoles: ['dispute_resolver'],
-    tone: 'secondary',
-    inputs: [
-      {
-        kind: 'distributions',
-        name: 'distributions',
-        label: 'Distribution of the remaining balance',
-      },
-    ],
-    path: () => '/escrow/single-release/v2/withdraw-remaining-funds',
-    isReady: (v) => {
-      const rows = rowsOf<DistributionRow>(v.distributions);
-      return (
-        rows.length > 0 &&
-        rows.every((d) => d.address.trim() !== '' && Number(d.amount) >= 0)
-      );
-    },
-    buildBody: ({ contractId, signer, values }) => ({
-      contractId,
-      disputeResolver: signer,
-      distributions: rowsOf<DistributionRow>(values.distributions).map((d) => ({
-        address: d.address.trim(),
-        amount: Number(d.amount),
-      })),
-    }),
-  },
-  {
-    key: 'extend-ttl',
-    label: 'Extend TTL',
-    kinds: ['single-release-v2'],
-    states: ['active'],
-    requiredRoles: ['admin'],
-    tone: 'secondary',
-    inputs: [
-      {
-        kind: 'amount',
-        name: 'ledgers',
-        label: 'Ledgers to extend',
-        placeholder: '100000',
-      },
-    ],
-    path: () => '/escrow/single-release/v2/extend-ttl',
-    isReady: (v) => Number.isInteger(Number(v.ledgers)) && Number(v.ledgers) >= 1,
-    buildBody: ({ contractId, signer, values }) => ({
-      contractId,
-      admin: signer,
-      ledgersToExtend: Number(values.ledgers),
-    }),
-  },
-];
+/**
+ * The v2 action set, parametrized by flavor. Single- and multi-release share
+ * everything except: multi-release release/dispute/resolve take milestone
+ * indexes, and its dispute endpoint is `dispute-milestones`.
+ */
+function v2Actions(
+  kind: 'single-release-v2' | 'multi-release-v2',
+): EscrowActionDef[] {
+  const multi = kind === 'multi-release-v2';
+  const base = `/escrow/${multi ? 'multi-release' : 'single-release'}/v2`;
 
-const REGISTRY: EscrowActionDef[] = [...SINGLE_RELEASE_V2];
+  return [
+    {
+      key: 'fund',
+      label: 'Fund',
+      kinds: [kind],
+      states: ['active'],
+      tone: 'default',
+      inputs: [
+        { kind: 'amount', name: 'amount', label: 'Amount to fund', placeholder: '100' },
+      ],
+      path: () => `${base}/fund`,
+      isReady: (v) => Number(v.amount) > 0,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        signer,
+        amount: Number(values.amount),
+      }),
+    },
+    {
+      key: 'release',
+      label: 'Release funds',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['release_signer'],
+      tone: 'secondary',
+      inputs: multi ? [MILESTONE_INDEXES_INPUT] : undefined,
+      path: () => `${base}/release-funds`,
+      isReady: multi ? indexesReady : undefined,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        releaseSigner: signer,
+        ...(multi ? { milestoneIndexes: toIndexes(values.milestoneIndexes) } : {}),
+      }),
+    },
+    {
+      key: 'approve-milestones',
+      label: 'Approve milestones',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['approver'],
+      tone: 'default',
+      inputs: [MILESTONE_INDEXES_INPUT],
+      path: () => `${base}/approve-milestones`,
+      isReady: indexesReady,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        approver: signer,
+        milestoneIndexes: toIndexes(values.milestoneIndexes),
+      }),
+    },
+    {
+      key: 'approve-and-release',
+      label: 'Approve & release',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['approver', 'release_signer'],
+      tone: 'secondary',
+      inputs: [MILESTONE_INDEXES_INPUT],
+      path: () => `${base}/approve-and-release-milestones`,
+      isReady: indexesReady,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        signer,
+        milestoneIndexes: toIndexes(values.milestoneIndexes),
+      }),
+    },
+    {
+      key: 'change-milestone-status',
+      label: 'Update milestone status',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['service_provider'],
+      tone: 'secondary',
+      inputs: [
+        { kind: 'statusUpdates', name: 'updates', label: 'Milestone status updates' },
+      ],
+      path: () => `${base}/change-milestone-status`,
+      isReady: (v) => {
+        const rows = rowsOf<StatusUpdateRow>(v.updates);
+        return (
+          rows.length > 0 &&
+          rows.every((r) => r.index.trim() !== '' && r.status.trim() !== '')
+        );
+      },
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        serviceProvider: signer,
+        updates: rowsOf<StatusUpdateRow>(values.updates)
+          .filter((r) => r.index.trim() !== '')
+          .map((r) => ({
+            index: Number(r.index),
+            newStatus: r.status.trim(),
+            ...(r.evidence.trim() ? { newEvidence: r.evidence.trim() } : {}),
+          })),
+      }),
+    },
+    {
+      key: 'dispute',
+      label: multi ? 'Dispute milestones' : 'Open dispute',
+      kinds: [kind],
+      states: ['active'],
+      tone: 'destructive',
+      inputs: multi ? [MILESTONE_INDEXES_INPUT, REASON_INPUT] : [REASON_INPUT],
+      path: () => `${base}/${multi ? 'dispute-milestones' : 'dispute'}`,
+      isReady: (v) =>
+        typeof v.reason === 'string' &&
+        v.reason.trim().length > 0 &&
+        (!multi || indexesReady(v)),
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        signer,
+        ...(multi ? { milestoneIndexes: toIndexes(values.milestoneIndexes) } : {}),
+        reason: (values.reason as string).trim(),
+      }),
+    },
+    {
+      key: 'resolve-dispute',
+      label: 'Resolve dispute',
+      kinds: [kind],
+      states: ['disputed'],
+      requiredRoles: ['dispute_resolver'],
+      tone: 'default',
+      inputs: multi
+        ? [
+            MILESTONE_INDEXES_INPUT,
+            distributionsInput('Distribution — the sum must equal the disputed balance'),
+          ]
+        : [distributionsInput('Distribution — the sum must equal the escrow balance')],
+      path: () => `${base}/resolve-dispute`,
+      isReady: (v) => distributionsReady(v) && (!multi || indexesReady(v)),
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        disputeResolver: signer,
+        ...(multi ? { milestoneIndexes: toIndexes(values.milestoneIndexes) } : {}),
+        distributions: distributionsBody(values),
+      }),
+    },
+    {
+      key: 'withdraw-remaining',
+      label: 'Withdraw remaining',
+      kinds: [kind],
+      states: ['released', 'disputed'],
+      requiredRoles: ['dispute_resolver'],
+      tone: 'secondary',
+      inputs: [distributionsInput('Distribution of the remaining balance')],
+      path: () => `${base}/withdraw-remaining-funds`,
+      isReady: distributionsReady,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        disputeResolver: signer,
+        distributions: distributionsBody(values),
+      }),
+    },
+    {
+      key: 'extend-ttl',
+      label: 'Extend TTL',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['admin'],
+      tone: 'secondary',
+      inputs: [
+        { kind: 'amount', name: 'ledgers', label: 'Ledgers to extend', placeholder: '100000' },
+      ],
+      path: () => `${base}/extend-ttl`,
+      isReady: (v) => Number.isInteger(Number(v.ledgers)) && Number(v.ledgers) >= 1,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        admin: signer,
+        ledgersToExtend: Number(values.ledgers),
+      }),
+    },
+  ];
+}
+
+const REGISTRY: EscrowActionDef[] = [
+  ...v2Actions('single-release-v2'),
+  ...v2Actions('multi-release-v2'),
+];
 
 /** Actions defined for a kind. (v1 kinds return none for now — frozen.) */
 export function actionsForKind(kind: EscrowKind): EscrowActionDef[] {
