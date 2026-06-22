@@ -280,6 +280,17 @@ function ActionsPanel({
         </div>
       )}
 
+      {myRoles.has('admin') && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+          <span className="text-xs text-muted-foreground">Admin</span>
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/escrows/${escrowId}/milestones`}>
+              Manage milestones
+            </Link>
+          </Button>
+        </div>
+      )}
+
       {action.isSubmitting && (
         <p className="text-xs text-muted-foreground">
           Building, signing &amp; submitting — approve the transaction in your
