@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  Loader2,
   Plus,
   Sparkles,
   Trash2,
@@ -20,7 +21,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { runEscrowAction, type SendResult } from '@/lib/escrow-actions';
+import {
+  runEscrowAction,
+  waitForEscrowByContract,
+  type ConfirmStatus,
+  type SendResult,
+} from '@/lib/escrow-actions';
 import { useSession } from '@/lib/session';
 import { useHasMounted } from '@/lib/use-has-mounted';
 import { cn } from '@/lib/utils';
@@ -125,6 +131,8 @@ export default function NewEscrowPage() {
   ]);
 
   const [attempted, setAttempted] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmStatus>('idle');
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   // Sensible defaults: the creator acts as approver / service provider /
   // release signer / platform (all editable).
@@ -173,7 +181,24 @@ export default function NewEscrowPage() {
 
   const deploy = useMutation({
     mutationFn: () => runEscrowAction(def.path, (signer) => buildBody(signer)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['escrows'] }),
+    onSuccess: async (result) => {
+      void qc.invalidateQueries({ queryKey: ['escrows'] });
+      const target = Number(result.ledger);
+      if (!result.contractId || !Number.isFinite(target) || target <= 0) {
+        // Deployed on-chain, but we can't track the read-model row (no
+        // contractId / ledger) — fall back to "it'll appear shortly".
+        setConfirm('timeout');
+        return;
+      }
+      setConfirm('confirming');
+      const found = await waitForEscrowByContract(qc, result.contractId, target);
+      if (found) {
+        setCreatedId(found.id);
+        setConfirm('confirmed');
+      } else {
+        setConfirm('timeout');
+      }
+    },
   });
 
   function buildBody(signer: string): Record<string, unknown> {
@@ -410,7 +435,11 @@ export default function NewEscrowPage() {
         ) : !session.data?.authenticated && !session.isLoading ? (
           <SignInPrompt />
         ) : deploy.data ? (
-          <SuccessState result={deploy.data} />
+          <SuccessState
+            result={deploy.data}
+            confirm={confirm}
+            escrowId={createdId}
+          />
         ) : (
           <form onSubmit={onSubmit} className="flex flex-col gap-6">
             <Section title="Escrow type">
@@ -912,7 +941,16 @@ function SingleAddress({
   );
 }
 
-function SuccessState({ result }: { result: SendResult }) {
+function SuccessState({
+  result,
+  confirm,
+  escrowId,
+}: {
+  result: SendResult;
+  confirm: ConfirmStatus;
+  escrowId: string | null;
+}) {
+  const indexing = confirm === 'idle' || confirm === 'confirming';
   return (
     <Card className="border-success/30 bg-success/5">
       <CardHeader>
@@ -940,16 +978,42 @@ function SuccessState({ result }: { result: SendResult }) {
             </div>
           )}
         </dl>
-        <p className="text-xs text-muted-foreground">
-          It&apos;ll appear in your list shortly — the read-model is fed by the
-          indexer.
-        </p>
-        <Button asChild className="w-fit">
-          <Link href="/escrows">
-            View escrows
-            <ArrowRight className="size-4" />
-          </Link>
-        </Button>
+
+        {indexing && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            Waiting for the indexer to pick it up…
+          </p>
+        )}
+        {confirm === 'confirmed' && (
+          <p className="text-xs text-success">Indexed and ready.</p>
+        )}
+        {confirm === 'timeout' && (
+          <p className="text-xs text-muted-foreground">
+            It&apos;ll appear in your list shortly — the read-model is fed by the
+            indexer.
+          </p>
+        )}
+
+        {confirm === 'confirmed' && escrowId ? (
+          <Button asChild className="w-fit">
+            <Link href={`/escrows/${escrowId}`}>
+              Open escrow
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+        ) : (
+          <Button
+            asChild
+            variant={indexing ? 'outline' : 'default'}
+            className="w-fit"
+          >
+            <Link href="/escrows">
+              View escrows
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

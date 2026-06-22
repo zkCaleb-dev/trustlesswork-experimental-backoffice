@@ -6,7 +6,7 @@ import {
 import { useState } from 'react';
 
 import { bffPost } from '@/lib/api';
-import { fetchEscrowDetail } from '@/lib/escrows';
+import { fetchEscrowDetail, fetchEscrows, type EscrowSummary } from '@/lib/escrows';
 import { publicEnv } from '@/lib/public-env';
 import { ensureWallet, signXdr } from '@/lib/wallet/kit';
 
@@ -85,6 +85,41 @@ async function waitForEscrowLedger(
     await sleep(CONFIRM_INTERVAL_MS);
   }
   return false;
+}
+
+/**
+ * Wait for a freshly-deployed escrow to show up in the read-model. A deploy
+ * returns a `contractId` immediately, but the read-model row (with its own id)
+ * only exists once the indexer projects the `tw_init`. We poll the account's
+ * escrow list until a row with this `contractId` appears and has caught up to
+ * the deploy ledger (so its snapshot is populated, not a bare shell). Returns
+ * the summary row on success, `null` on timeout. Each poll warms the
+ * `['escrows', {}]` cache the list page reads.
+ */
+export async function waitForEscrowByContract(
+  qc: QueryClient,
+  contractId: string,
+  targetLedger: number,
+): Promise<EscrowSummary | null> {
+  const deadline = Date.now() + CONFIRM_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const list = await qc.fetchQuery({
+        queryKey: ['escrows', {}],
+        queryFn: () => fetchEscrows(),
+      });
+      const found = list.find(
+        (e) =>
+          e.contractId === contractId &&
+          Number(e.lastLedgerSeq) >= targetLedger,
+      );
+      if (found) return found;
+    } catch {
+      // Transient — the deadline bounds how long we keep retrying.
+    }
+    await sleep(CONFIRM_INTERVAL_MS);
+  }
+  return null;
 }
 
 /**
