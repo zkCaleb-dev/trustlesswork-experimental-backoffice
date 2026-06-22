@@ -1,14 +1,45 @@
 'use client';
 
+import { LayoutGrid, LogOut, Plus, Settings, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { truncateMiddle } from '@/lib/format';
 import { publicEnv } from '@/lib/public-env';
 import { useLogout, useSession } from '@/lib/session';
+import { cn } from '@/lib/utils';
 
-/** App chrome for the signed-in area: a top nav bar + a centered container. */
+const NAV: {
+  href: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  match: (pathname: string) => boolean;
+}[] = [
+  {
+    href: '/escrows',
+    label: 'Escrows',
+    icon: LayoutGrid,
+    match: (p) =>
+      p === '/escrows' || (p.startsWith('/escrows/') && p !== '/escrows/new'),
+  },
+  {
+    href: '/escrows/new',
+    label: 'New escrow',
+    icon: Plus,
+    match: (p) => p === '/escrows/new',
+  },
+  {
+    href: '/settings',
+    label: 'Settings',
+    icon: Settings,
+    match: (p) => p === '/settings',
+  },
+];
+
+/** App chrome for the signed-in area: a sticky top nav bar + a centered container. */
 export function Shell({ children }: { children: ReactNode }) {
   const session = useSession();
   const logout = useLogout();
@@ -17,86 +48,78 @@ export function Shell({ children }: { children: ReactNode }) {
   const wallet = session.data?.wallet;
 
   return (
-    <div className="min-h-screen bg-neutral-50 text-neutral-900">
-      <nav className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 py-3">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="text-sm font-semibold tracking-tight">
-              Trustless Work
-            </Link>
-            <NavLink
-              href="/escrows"
-              active={
-                pathname === '/escrows' ||
-                (pathname.startsWith('/escrows/') && pathname !== '/escrows/new')
-              }
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-30 border-b border-border/70 bg-background/80 backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-4 px-4 sm:px-6">
+          <div className="flex items-center gap-1">
+            <Link
+              href="/"
+              className="mr-3 flex items-center gap-2 font-semibold tracking-tight"
             >
-              Escrows
-            </NavLink>
-            <NavLink href="/escrows/new" active={pathname === '/escrows/new'}>
-              New escrow
-            </NavLink>
-            <NavLink href="/settings" active={pathname === '/settings'}>
-              Settings
-            </NavLink>
+              <span className="grid size-7 place-items-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
+                TW
+              </span>
+              <span className="hidden sm:inline">Trustless Work</span>
+            </Link>
+            <nav className="flex items-center gap-1">
+              {NAV.map(({ href, label, icon: Icon, match }) => {
+                const active = match(pathname);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:px-3',
+                      active
+                        ? 'bg-accent text-accent-foreground'
+                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                    )}
+                  >
+                    <Icon className="size-4" />
+                    <span className="hidden sm:inline">{label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
           </div>
-          <div className="flex items-center gap-3 text-sm">
-            <span className="hidden text-xs text-neutral-400 sm:inline">
+          <div className="flex items-center gap-2">
+            <Badge
+              variant="outline"
+              className="hidden font-normal text-muted-foreground capitalize sm:inline-flex"
+            >
               {publicEnv.stellarNetwork}
-            </span>
+            </Badge>
             {authed ? (
               <>
                 {wallet && (
-                  <code
-                    className="rounded bg-neutral-100 px-2 py-1 text-xs"
+                  <span
+                    className="hidden items-center gap-1.5 rounded-md bg-accent px-2 py-1 font-mono text-xs text-accent-foreground md:inline-flex"
                     title={wallet}
                   >
+                    <Wallet className="size-3.5" />
                     {truncateMiddle(wallet)}
-                  </code>
+                  </span>
                 )}
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => logout.mutate()}
                   disabled={logout.isPending}
-                  className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50"
                 >
-                  Sign out
-                </button>
+                  <LogOut className="size-4" />
+                  <span className="hidden sm:inline">Sign out</span>
+                </Button>
               </>
             ) : (
-              <Link
-                href="/login"
-                className="rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800"
-              >
-                Sign in
-              </Link>
+              <Button size="sm" asChild>
+                <Link href="/login">Sign in</Link>
+              </Button>
             )}
           </div>
         </div>
-      </nav>
-      <div className="mx-auto max-w-4xl px-6 py-8">{children}</div>
+      </header>
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">{children}</main>
     </div>
-  );
-}
-
-function NavLink({
-  href,
-  active,
-  children,
-}: {
-  href: string;
-  active: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className={`text-sm transition ${
-        active
-          ? 'font-medium text-neutral-900'
-          : 'text-neutral-500 hover:text-neutral-800'
-      }`}
-    >
-      {children}
-    </Link>
   );
 }
