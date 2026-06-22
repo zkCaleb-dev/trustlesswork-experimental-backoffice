@@ -1,8 +1,10 @@
 'use client';
 
+import { useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 
+import { bffPost } from '@/lib/api';
 import { Shell } from '@/components/shell';
 import {
   useCreateApiKey,
@@ -47,6 +49,7 @@ export default function SettingsPage() {
         <div className="mt-6 flex flex-col gap-6">
           <ApiKeysSection />
           <WalletsSection />
+          <SharingSection />
         </div>
       )}
     </Shell>
@@ -299,6 +302,78 @@ function WalletRow({
         </button>
       </div>
     </li>
+  );
+}
+
+function SharingSection() {
+  const [email, setEmail] = useState('');
+  const [done, setDone] = useState<string | null>(null);
+
+  const share = useMutation({
+    mutationFn: (granteeEmail: string) =>
+      bffPost('/core/escrows/access-grants', {
+        granteeEmail,
+        scope: 'grantor',
+      }),
+    onSuccess: () =>
+      setDone('Shared — they can now view the escrows you participate in.'),
+  });
+  const revoke = useMutation({
+    mutationFn: (granteeEmail: string) =>
+      bffPost<{ revoked: number }>('/core/escrows/access-grants/revoke', {
+        granteeEmail,
+        scope: 'grantor',
+      }),
+    onSuccess: (r) =>
+      setDone(r.revoked > 0 ? 'Access revoked.' : 'No active access to revoke.'),
+  });
+
+  const busy = share.isPending || revoke.isPending;
+  const valid = /\S+@\S+\.\S+/.test(email.trim());
+
+  return (
+    <section className="rounded-xl border border-neutral-200 bg-white p-5">
+      <h2 className="mb-1 text-sm font-medium text-neutral-700">Share access</h2>
+      <p className="mb-3 text-xs text-neutral-500">
+        Give another Trustless Work account read-only access to every escrow you
+        participate in. They must already have an account — enter their email.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-neutral-400">Account email</span>
+          <input
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setDone(null);
+            }}
+            placeholder="partner@example.com"
+            inputMode="email"
+            className="w-64 rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
+          />
+        </label>
+        <button
+          onClick={() => share.mutate(email.trim())}
+          disabled={busy || !valid}
+          className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {share.isPending ? 'Sharing…' : 'Grant access'}
+        </button>
+        <button
+          onClick={() => revoke.mutate(email.trim())}
+          disabled={busy || !valid}
+          className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          {revoke.isPending ? 'Revoking…' : 'Revoke'}
+        </button>
+      </div>
+
+      {(share.error || revoke.error) && (
+        <ErrorLine error={share.error ?? revoke.error} />
+      )}
+      {done && <p className="mt-3 text-xs text-green-700">{done}</p>}
+    </section>
   );
 }
 
