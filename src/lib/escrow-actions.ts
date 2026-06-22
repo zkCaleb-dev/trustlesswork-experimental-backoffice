@@ -5,7 +5,7 @@ import {
 } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { bffPost } from '@/lib/api';
+import { bff, bffPost } from '@/lib/api';
 import { fetchEscrowDetail, fetchEscrows, type EscrowSummary } from '@/lib/escrows';
 import { publicEnv } from '@/lib/public-env';
 import { ensureWallet, signXdr } from '@/lib/wallet/kit';
@@ -33,9 +33,14 @@ export interface SendResult {
 export async function runEscrowAction(
   buildPath: string,
   bodyFor: (signer: string) => Record<string, unknown>,
+  opts: { method?: 'POST' | 'PUT' } = {},
 ): Promise<SendResult> {
   const signer = await ensureWallet();
-  const built = await bffPost<UnsignedTx>(`/core${buildPath}`, bodyFor(signer));
+  const built = await bff<UnsignedTx>(`/core${buildPath}`, {
+    method: opts.method ?? 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bodyFor(signer)),
+  });
   const signedXdr = await signXdr(
     built.unsignedXdr,
     signer,
@@ -47,6 +52,7 @@ export async function runEscrowAction(
 export interface EscrowActionVars {
   buildPath: string;
   bodyFor: (signer: string) => Record<string, unknown>;
+  method?: 'POST' | 'PUT';
 }
 
 /** Confirmation phase after the tx is broadcast on-chain. */
@@ -138,7 +144,7 @@ export function useEscrowAction(escrowId: string) {
 
   const mutation = useMutation({
     mutationFn: (vars: EscrowActionVars) =>
-      runEscrowAction(vars.buildPath, vars.bodyFor),
+      runEscrowAction(vars.buildPath, vars.bodyFor, { method: vars.method }),
     onMutate: () => setConfirm('idle'),
     onSuccess: async (result) => {
       const target = Number(result.ledger);

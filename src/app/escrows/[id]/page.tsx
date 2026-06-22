@@ -288,6 +288,9 @@ function ActionsPanel({
               Manage milestones
             </Link>
           </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/escrows/${escrowId}/edit`}>Edit escrow</Link>
+          </Button>
         </div>
       )}
 
