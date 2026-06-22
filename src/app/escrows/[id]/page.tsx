@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
@@ -14,6 +14,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useEscrowAction } from '@/lib/escrow-actions';
+import {
+  actionsForKind,
+  actionsForState,
+  deriveEscrowKind,
+  initialValues,
+  roleLabel,
+  walletRoles,
+  type ActionInput,
+  type ActionValues,
+  type DistributionRow,
+  type EscrowActionDef,
+  type EscrowKind,
+  type EscrowStatus,
+} from '@/lib/escrow-action-registry';
 import {
   useEscrow,
   type EscrowDeposit,
@@ -134,6 +148,10 @@ export default function EscrowDetailPage() {
                 escrowId={id}
                 contractId={query.data.escrow.contractId}
                 contractType={query.data.escrow.contractType}
+                status={query.data.escrow.status}
+                snapshot={query.data.escrow.snapshot}
+                participants={query.data.participants}
+                myWallet={session.data?.wallet ?? null}
               />
             </Section>
 
@@ -194,107 +212,72 @@ function ActionsPanel({
   escrowId,
   contractId,
   contractType,
+  status,
+  snapshot,
+  participants,
+  myWallet,
 }: {
   escrowId: string;
   contractId: string;
   contractType: string | null;
+  status: string | null;
+  snapshot: Record<string, unknown> | null;
+  participants: EscrowParticipant[];
+  myWallet: string | null;
 }) {
   const action = useEscrowAction(escrowId);
-  const [amount, setAmount] = useState('');
-  const [reason, setReason] = useState('');
+  const kind = deriveEscrowKind(contractType, snapshot);
+  const busy = action.isSubmitting || action.isConfirming;
 
-  if (contractType !== 'single-release-v2') {
+  if (!kind) {
     return (
       <Empty>
-        On-chain actions for “{contractType ?? 'unknown'}” escrows are coming
-        soon. (Single-release v2 is supported.)
+        Actions appear once the escrow&apos;s on-chain state has been indexed.
+      </Empty>
+    );
+  }
+  if (kind.endsWith('-v1')) {
+    return (
+      <Empty>
+        On-chain actions for v1 escrows aren&apos;t available here yet — v1 is
+        frozen; v2 is supported.
       </Empty>
     );
   }
 
-  const base = '/escrow/single-release/v2';
-  const busy = action.isSubmitting || action.isConfirming;
+  const myRoles = walletRoles(participants, myWallet);
+  const available = actionsForState(
+    actionsForKind(kind),
+    status as EscrowStatus | null,
+  );
 
   return (
     <div className="flex flex-col gap-5">
       <p className="text-xs text-muted-foreground">
         Each action builds an unsigned transaction, you approve it in your
-        wallet, and it&apos;s submitted on-chain. Use a wallet with the right
-        role for the action.
+        wallet, and it&apos;s submitted on-chain. Only the actions your role and
+        the escrow&apos;s state allow are shown.
       </p>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="fund-amount">Amount to fund</Label>
-          <Input
-            id="fund-amount"
-            value={amount}
-            inputMode="decimal"
-            placeholder="100"
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-32"
-          />
+      {available.length === 0 ? (
+        <Empty>
+          No actions available while the escrow is “{status ?? 'unknown'}”.
+        </Empty>
+      ) : (
+        <div className="flex flex-col divide-y divide-border">
+          {available.map((def) => (
+            <ActionRow
+              key={def.key}
+              def={def}
+              kind={kind}
+              contractId={contractId}
+              action={action}
+              busy={busy}
+              myRoles={myRoles}
+            />
+          ))}
         </div>
-        <Button
-          disabled={busy || !amount || Number(amount) <= 0}
-          onClick={() =>
-            action.run(
-              {
-                buildPath: `${base}/fund`,
-                bodyFor: (signer) => ({
-                  contractId,
-                  signer,
-                  amount: Number(amount),
-                }),
-              },
-              { onSuccess: () => setAmount('') },
-            )
-          }
-        >
-          Fund
-        </Button>
-        <Button
-          variant="secondary"
-          className="ml-auto"
-          disabled={busy}
-          onClick={() =>
-            action.run({
-              buildPath: `${base}/release-funds`,
-              bodyFor: (signer) => ({ contractId, releaseSigner: signer }),
-            })
-          }
-        >
-          Release funds
-        </Button>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <Label htmlFor="dispute-reason">Dispute reason</Label>
-          <Input
-            id="dispute-reason"
-            value={reason}
-            maxLength={500}
-            placeholder="Why are you opening a dispute?"
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </div>
-        <Button
-          variant="destructive"
-          disabled={busy || !reason.trim()}
-          onClick={() =>
-            action.run(
-              {
-                buildPath: `${base}/dispute`,
-                bodyFor: (signer) => ({ contractId, signer, reason }),
-              },
-              { onSuccess: () => setReason('') },
-            )
-          }
-        >
-          Open dispute
-        </Button>
-      </div>
+      )}
 
       {action.isSubmitting && (
         <p className="text-xs text-muted-foreground">
@@ -338,6 +321,165 @@ function ActionsPanel({
             : 'The action failed.'}
         </p>
       )}
+    </div>
+  );
+}
+
+function ActionRow({
+  def,
+  kind,
+  contractId,
+  action,
+  busy,
+  myRoles,
+}: {
+  def: EscrowActionDef;
+  kind: EscrowKind;
+  contractId: string;
+  action: ReturnType<typeof useEscrowAction>;
+  busy: boolean;
+  myRoles: Set<string>;
+}) {
+  const [values, setValues] = useState<ActionValues>(() => initialValues(def));
+  const roleOk = !def.requiredRole || myRoles.has(def.requiredRole);
+  const ready = def.isReady ? def.isReady(values) : true;
+
+  const submit = () =>
+    action.run(
+      {
+        buildPath: def.path(kind),
+        bodyFor: (signer) => def.buildBody({ contractId, signer, values }),
+      },
+      { onSuccess: () => setValues(initialValues(def)) },
+    );
+
+  return (
+    <div className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{def.label}</span>
+        {def.requiredRole && (
+          <span className="text-xs text-muted-foreground">
+            signs as {roleLabel(def.requiredRole)}
+          </span>
+        )}
+      </div>
+      {def.inputs?.map((input) => (
+        <ActionInputField
+          key={input.name}
+          input={input}
+          value={values[input.name]}
+          onChange={(v) => setValues((prev) => ({ ...prev, [input.name]: v }))}
+        />
+      ))}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          variant={def.tone === 'default' ? undefined : def.tone}
+          disabled={busy || !roleOk || !ready}
+          onClick={submit}
+        >
+          {def.label}
+        </Button>
+        {!roleOk && def.requiredRole && (
+          <span className="text-xs text-muted-foreground">
+            Connect the {roleLabel(def.requiredRole)} wallet to do this.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActionInputField({
+  input,
+  value,
+  onChange,
+}: {
+  input: ActionInput;
+  value: ActionValues[string] | undefined;
+  onChange: (value: ActionValues[string]) => void;
+}) {
+  if (input.kind === 'amount') {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Label>{input.label}</Label>
+        <Input
+          value={typeof value === 'string' ? value : ''}
+          inputMode="decimal"
+          placeholder={input.placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-40"
+        />
+      </div>
+    );
+  }
+  if (input.kind === 'text') {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Label>{input.label}</Label>
+        <Input
+          value={typeof value === 'string' ? value : ''}
+          maxLength={input.maxLength}
+          placeholder={input.placeholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
+    );
+  }
+
+  const rows = Array.isArray(value) ? value : [];
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>{input.label}</Label>
+      {rows.map((row, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Input
+            value={row.address}
+            placeholder="G… recipient"
+            className="min-w-0 flex-1 font-mono text-xs"
+            onChange={(e) =>
+              onChange(
+                rows.map((r, j) =>
+                  j === i ? { ...r, address: e.target.value } : r,
+                ),
+              )
+            }
+          />
+          <Input
+            value={row.amount}
+            inputMode="decimal"
+            placeholder="amount"
+            className="w-28"
+            onChange={(e) =>
+              onChange(
+                rows.map((r, j) =>
+                  j === i ? { ...r, amount: e.target.value } : r,
+                ),
+              )
+            }
+          />
+          {rows.length > 1 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Remove recipient"
+              onClick={() => onChange(rows.filter((_, j) => j !== i))}
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="w-fit text-muted-foreground"
+        onClick={() => onChange([...rows, { address: '', amount: '' }])}
+      >
+        <Plus className="size-4" />
+        Add recipient
+      </Button>
     </div>
   );
 }
