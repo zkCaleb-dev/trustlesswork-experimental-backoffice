@@ -237,15 +237,6 @@ function ActionsPanel({
       </Empty>
     );
   }
-  if (kind.endsWith('-v1')) {
-    return (
-      <Empty>
-        On-chain actions for v1 escrows aren&apos;t available here yet — v1 is
-        frozen; v2 is supported.
-      </Empty>
-    );
-  }
-
   const myRoles = walletRoles(participants, myWallet);
   const available = actionsForState(
     actionsForKind(kind),

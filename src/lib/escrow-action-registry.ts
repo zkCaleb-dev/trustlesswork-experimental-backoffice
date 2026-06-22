@@ -214,6 +214,37 @@ const distributionsBody = (values: ActionValues) =>
     amount: Number(d.amount),
   }));
 
+// v1-specific inputs/helpers. v1 differs from v2: singular roles, a single
+// milestone index (not arrays), and release/resolve/withdraw take the
+// Trustless Work fee wallet explicitly (v2 injects it server-side).
+const TW_FEE_WALLET_INPUT: ActionInput = {
+  kind: 'text',
+  name: 'trustlessWorkAddress',
+  label: 'Trustless Work fee wallet (G…)',
+  placeholder: 'G…',
+};
+
+const MILESTONE_INDEX_INPUT: ActionInput = {
+  kind: 'amount',
+  name: 'milestoneIndex',
+  label: 'Milestone index (0-based)',
+  placeholder: '0',
+};
+
+const G_ADDRESS = /^G[A-Z2-7]{55}$/;
+
+const isGAddress = (v: ActionValues[string] | undefined): boolean =>
+  typeof v === 'string' && G_ADDRESS.test(v.trim());
+
+const isMilestoneIndex = (v: ActionValues[string] | undefined): boolean =>
+  typeof v === 'string' &&
+  v.trim() !== '' &&
+  Number.isInteger(Number(v)) &&
+  Number(v) >= 0;
+
+const trimmed = (v: ActionValues[string] | undefined): string =>
+  typeof v === 'string' ? v.trim() : '';
+
 // ── registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -401,9 +432,195 @@ function v2Actions(
   ];
 }
 
+/**
+ * The v1 action set, parametrized by flavor. v1 is the frozen legacy contract:
+ * singular roles, per-milestone actions take a single index (not a batch), the
+ * caller passes the Trustless Work fee wallet on release/resolve/withdraw, and
+ * extend-ttl is signed by the platform (v1 has no admin role). No
+ * approve-and-release or manage-milestones (v2-only).
+ */
+function v1Actions(
+  kind: 'single-release-v1' | 'multi-release-v1',
+): EscrowActionDef[] {
+  const multi = kind === 'multi-release-v1';
+  const base = `/escrow/${multi ? 'multi-release' : 'single-release'}/v1`;
+
+  return [
+    {
+      key: 'fund',
+      label: 'Fund',
+      kinds: [kind],
+      states: ['active'],
+      tone: 'default',
+      inputs: [
+        { kind: 'amount', name: 'amount', label: 'Amount to fund', placeholder: '100' },
+      ],
+      path: () => `${base}/fund`,
+      isReady: (v) => Number(v.amount) > 0,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        signer,
+        amount: Number(values.amount),
+      }),
+    },
+    {
+      key: 'release',
+      label: 'Release funds',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['release_signer'],
+      tone: 'secondary',
+      inputs: multi
+        ? [TW_FEE_WALLET_INPUT, MILESTONE_INDEX_INPUT]
+        : [TW_FEE_WALLET_INPUT],
+      path: () => `${base}/${multi ? 'release-milestone-funds' : 'release-funds'}`,
+      isReady: (v) =>
+        isGAddress(v.trustlessWorkAddress) &&
+        (!multi || isMilestoneIndex(v.milestoneIndex)),
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        releaseSigner: signer,
+        trustlessWorkAddress: trimmed(values.trustlessWorkAddress),
+        ...(multi ? { milestoneIndex: Number(values.milestoneIndex) } : {}),
+      }),
+    },
+    {
+      key: 'approve-milestone',
+      label: 'Approve milestone',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['approver'],
+      tone: 'default',
+      inputs: [MILESTONE_INDEX_INPUT],
+      path: () => `${base}/approve-milestone`,
+      isReady: (v) => isMilestoneIndex(v.milestoneIndex),
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        approver: signer,
+        milestoneIndex: Number(values.milestoneIndex),
+      }),
+    },
+    {
+      key: 'change-milestone-status',
+      label: 'Update milestone status',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['service_provider'],
+      tone: 'secondary',
+      inputs: [
+        MILESTONE_INDEX_INPUT,
+        { kind: 'text', name: 'newStatus', label: 'New status', placeholder: 'completed' },
+        {
+          kind: 'text',
+          name: 'newEvidence',
+          label: 'Evidence (optional)',
+          placeholder: 'URL / IPFS hash',
+        },
+      ],
+      path: () => `${base}/change-milestone-status`,
+      isReady: (v) =>
+        isMilestoneIndex(v.milestoneIndex) && trimmed(v.newStatus) !== '',
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        serviceProvider: signer,
+        milestoneIndex: Number(values.milestoneIndex),
+        newStatus: trimmed(values.newStatus),
+        ...(trimmed(values.newEvidence)
+          ? { newEvidence: trimmed(values.newEvidence) }
+          : {}),
+      }),
+    },
+    {
+      key: 'dispute',
+      label: multi ? 'Dispute milestone' : 'Open dispute',
+      kinds: [kind],
+      states: ['active'],
+      tone: 'destructive',
+      inputs: multi ? [MILESTONE_INDEX_INPUT] : undefined,
+      path: () => `${base}/${multi ? 'dispute-milestone' : 'dispute'}`,
+      isReady: multi ? (v) => isMilestoneIndex(v.milestoneIndex) : undefined,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        signer,
+        ...(multi ? { milestoneIndex: Number(values.milestoneIndex) } : {}),
+      }),
+    },
+    {
+      key: 'resolve-dispute',
+      label: 'Resolve dispute',
+      kinds: [kind],
+      states: ['disputed'],
+      requiredRoles: ['dispute_resolver'],
+      tone: 'default',
+      inputs: multi
+        ? [
+            TW_FEE_WALLET_INPUT,
+            MILESTONE_INDEX_INPUT,
+            distributionsInput('Distribution — the sum must equal the milestone balance'),
+          ]
+        : [
+            TW_FEE_WALLET_INPUT,
+            distributionsInput('Distribution — the sum must equal the escrow balance'),
+          ],
+      path: () => `${base}/${multi ? 'resolve-milestone-dispute' : 'resolve-dispute'}`,
+      isReady: (v) =>
+        isGAddress(v.trustlessWorkAddress) &&
+        distributionsReady(v) &&
+        (!multi || isMilestoneIndex(v.milestoneIndex)),
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        disputeResolver: signer,
+        trustlessWorkAddress: trimmed(values.trustlessWorkAddress),
+        ...(multi ? { milestoneIndex: Number(values.milestoneIndex) } : {}),
+        distributions: distributionsBody(values),
+      }),
+    },
+    {
+      key: 'withdraw-remaining',
+      label: 'Withdraw remaining',
+      kinds: [kind],
+      states: ['released', 'disputed'],
+      requiredRoles: ['dispute_resolver'],
+      tone: 'secondary',
+      inputs: [
+        TW_FEE_WALLET_INPUT,
+        distributionsInput('Distribution of the remaining balance'),
+      ],
+      path: () => `${base}/withdraw-remaining-funds`,
+      isReady: (v) => isGAddress(v.trustlessWorkAddress) && distributionsReady(v),
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        disputeResolver: signer,
+        trustlessWorkAddress: trimmed(values.trustlessWorkAddress),
+        distributions: distributionsBody(values),
+      }),
+    },
+    {
+      key: 'extend-ttl',
+      label: 'Extend TTL',
+      kinds: [kind],
+      states: ['active'],
+      requiredRoles: ['platform'],
+      tone: 'secondary',
+      inputs: [
+        { kind: 'amount', name: 'ledgers', label: 'Ledgers to extend', placeholder: '100000' },
+      ],
+      path: () => `${base}/extend-ttl`,
+      isReady: (v) => Number.isInteger(Number(v.ledgers)) && Number(v.ledgers) >= 1,
+      buildBody: ({ contractId, signer, values }) => ({
+        contractId,
+        platformAddress: signer,
+        ledgersToExtend: Number(values.ledgers),
+      }),
+    },
+  ];
+}
+
 const REGISTRY: EscrowActionDef[] = [
   ...v2Actions('single-release-v2'),
   ...v2Actions('multi-release-v2'),
+  ...v1Actions('single-release-v1'),
+  ...v1Actions('multi-release-v1'),
 ];
 
 /** Actions defined for a kind. (v1 kinds return none for now — frozen.) */
