@@ -87,11 +87,16 @@ export function useEscrows(filters: EscrowFilters = {}) {
   });
 }
 
+/** Fetches one escrow in full from the BFF. Throws on 404 / non-2xx. */
+export function fetchEscrowDetail(id: string): Promise<EscrowDetail> {
+  return bff<EscrowDetail>(`/core/escrows/${encodeURIComponent(id)}`);
+}
+
 /** One escrow in full. 404 (thrown) means "not found or not in your access set". */
 export function useEscrow(id: string) {
   return useQuery({
     queryKey: ['escrow', id],
-    queryFn: () => bff<EscrowDetail>(`/core/escrows/${encodeURIComponent(id)}`),
+    queryFn: () => fetchEscrowDetail(id),
     enabled: id.length > 0,
   });
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
@@ -213,7 +213,7 @@ function ActionsPanel({
   }
 
   const base = '/escrow/single-release/v2';
-  const busy = action.isPending;
+  const busy = action.isSubmitting || action.isConfirming;
 
   return (
     <div className="flex flex-col gap-5">
@@ -238,7 +238,7 @@ function ActionsPanel({
         <Button
           disabled={busy || !amount || Number(amount) <= 0}
           onClick={() =>
-            action.mutate(
+            action.run(
               {
                 buildPath: `${base}/fund`,
                 bodyFor: (signer) => ({
@@ -258,7 +258,7 @@ function ActionsPanel({
           className="ml-auto"
           disabled={busy}
           onClick={() =>
-            action.mutate({
+            action.run({
               buildPath: `${base}/release-funds`,
               bodyFor: (signer) => ({ contractId, releaseSigner: signer }),
             })
@@ -283,7 +283,7 @@ function ActionsPanel({
           variant="destructive"
           disabled={busy || !reason.trim()}
           onClick={() =>
-            action.mutate(
+            action.run(
               {
                 buildPath: `${base}/dispute`,
                 bodyFor: (signer) => ({ contractId, signer, reason }),
@@ -296,10 +296,39 @@ function ActionsPanel({
         </Button>
       </div>
 
-      {action.isPending && (
+      {action.isSubmitting && (
         <p className="text-xs text-muted-foreground">
           Building, signing &amp; submitting — approve the transaction in your
           wallet…
+        </p>
+      )}
+      {action.isConfirming && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          Submitted
+          {action.data?.txHash
+            ? ` · tx ${truncateMiddle(action.data.txHash)}`
+            : ''}{' '}
+          — waiting for the network to reflect it…
+        </p>
+      )}
+      {action.confirm === 'confirmed' && (
+        <p className="text-xs text-success">
+          Done ✓
+          {action.data?.txHash
+            ? ` · tx ${truncateMiddle(action.data.txHash)}`
+            : ''}{' '}
+          — the escrow is up to date.
+        </p>
+      )}
+      {action.confirm === 'timeout' && (
+        <p className="text-xs text-muted-foreground">
+          Submitted
+          {action.data?.txHash
+            ? ` · tx ${truncateMiddle(action.data.txHash)}`
+            : ''}
+          . Taking longer than usual to appear — it&apos;ll update on its own
+          shortly.
         </p>
       )}
       {action.error && (
@@ -307,15 +336,6 @@ function ActionsPanel({
           {action.error instanceof Error
             ? action.error.message
             : 'The action failed.'}
-        </p>
-      )}
-      {action.isSuccess && (
-        <p className="text-xs text-success">
-          Submitted ✓
-          {action.data?.txHash
-            ? ` · tx ${truncateMiddle(action.data.txHash)}`
-            : ''}
-          . The escrow updates shortly (indexer) — hit refresh on the list.
         </p>
       )}
     </div>
