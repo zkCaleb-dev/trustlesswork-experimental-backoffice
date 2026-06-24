@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { coreFetch } from '@/server/core/client';
+import { platformFetch } from '@/server/core/client';
 import { parseBody, relay } from '@/server/bff';
 
 const schema = z.object({
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   const body = await parseBody(req, schema);
   if (!body.ok) return body.response;
 
-  const result = await coreFetch('/auth/register/verify', {
+  const result = await platformFetch('/auth/register/verify', {
     method: 'POST',
     body: body.data,
   });

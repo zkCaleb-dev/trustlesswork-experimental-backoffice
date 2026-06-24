@@ -80,6 +80,37 @@ export async function coreFetch<T = unknown>(
   return { ok: true, status: res.status, data: json as T, problem: null };
 }
 
+/**
+ * Call the core as the PLATFORM. The core now mediates register / login /
+ * recover behind a `BACKOFFICE_ADMIN`-roled credential, so these flows are no
+ * longer public: the BFF must present the server-only admin key. Centralised
+ * here so every mediated route injects the same credential and fails the same
+ * (clear) way when it isn't configured — never a confusing bare 401 from core.
+ */
+export async function platformFetch<T = unknown>(
+  path: string,
+  options: Omit<CoreFetchOptions, 'apiKey'> = {},
+): Promise<CoreResult<T>> {
+  if (!serverEnv.BACKOFFICE_ADMIN_API_KEY) {
+    return {
+      ok: false,
+      status: 503,
+      data: null,
+      problem: {
+        status: 503,
+        code: 'PLATFORM_CREDENTIAL_MISSING',
+        detail:
+          'BACKOFFICE_ADMIN_API_KEY is not configured; platform-mediated auth is unavailable.',
+      },
+    };
+  }
+
+  return coreFetch<T>(path, {
+    ...options,
+    apiKey: serverEnv.BACKOFFICE_ADMIN_API_KEY,
+  });
+}
+
 function safeJsonParse(text: string): unknown {
   try {
     return JSON.parse(text);

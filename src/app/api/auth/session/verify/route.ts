@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { coreFetch } from '@/server/core/client';
+import { platformFetch } from '@/server/core/client';
 import { setSessionToken } from '@/server/core/session';
 import { parseBody } from '@/server/bff';
 
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   const body = await parseBody(req, schema);
   if (!body.ok) return body.response;
 
-  const result = await coreFetch<{ token: string; expiresAt: string }>(
+  const result = await platformFetch<{ token: string; expiresAt: string }>(
     '/auth/session/verify',
     { method: 'POST', body: body.data },
   );
