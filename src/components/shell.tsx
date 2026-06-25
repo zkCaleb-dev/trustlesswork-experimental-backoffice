@@ -1,6 +1,14 @@
 'use client';
 
-import { Building2, LayoutGrid, LogOut, Plus, Settings, Wallet } from 'lucide-react';
+import {
+  Building2,
+  LayoutGrid,
+  LogOut,
+  Plus,
+  Settings,
+  ShieldCheck,
+  Wallet,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ComponentType, ReactNode } from 'react';
@@ -9,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { truncateMiddle } from '@/lib/format';
 import { publicEnv } from '@/lib/public-env';
-import { useLogout, useSession } from '@/lib/session';
+import { isAdminSession, useLogout, useSession } from '@/lib/session';
 import { cn } from '@/lib/utils';
 
 const NAV: {
@@ -17,6 +25,7 @@ const NAV: {
   label: string;
   icon: ComponentType<{ className?: string }>;
   match: (pathname: string) => boolean;
+  adminOnly?: boolean;
 }[] = [
   {
     href: '/escrows',
@@ -43,6 +52,13 @@ const NAV: {
     icon: Settings,
     match: (p) => p === '/settings',
   },
+  {
+    href: '/admin',
+    label: 'Admin',
+    icon: ShieldCheck,
+    match: (p) => p.startsWith('/admin'),
+    adminOnly: true,
+  },
 ];
 
 /** App chrome for the signed-in area: a sticky top nav bar + a centered container. */
@@ -52,6 +68,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const authed = session.data?.authenticated ?? false;
   const wallet = session.data?.wallet;
+  const admin = isAdminSession(session.data);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -68,7 +85,8 @@ export function Shell({ children }: { children: ReactNode }) {
               <span className="hidden sm:inline">Trustless Work</span>
             </Link>
             <nav className="flex items-center gap-1">
-              {NAV.map(({ href, label, icon: Icon, match }) => {
+              {NAV.filter((n) => !n.adminOnly || admin).map(
+                ({ href, label, icon: Icon, match }) => {
                 const active = match(pathname);
                 return (
                   <Link

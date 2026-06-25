@@ -7,6 +7,8 @@ export interface SessionUser {
   email: string | null;
   firstName: string | null;
   lastName: string | null;
+  /** Account-level roles (present once the core exposes them on /users/me). */
+  roles?: string[];
 }
 
 export interface SessionState {
@@ -14,6 +16,12 @@ export interface SessionState {
   user?: SessionUser;
   /** The account's primary wallet address, for display. */
   wallet?: string | null;
+}
+
+/** True when the session holds an operator role (gates the admin panel). */
+export function isAdminSession(state: SessionState | undefined): boolean {
+  const roles = state?.user?.roles ?? [];
+  return roles.includes('ADMIN') || roles.includes('BACKOFFICE_ADMIN');
 }
 
 /** Reactive auth state, resolved server-side from the httpOnly cookie. */
