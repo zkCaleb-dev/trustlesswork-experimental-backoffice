@@ -45,9 +45,10 @@ export function useMyApiKeys() {
 export function useCreateApiKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (description?: string) =>
+    mutationFn: (input: { description?: string; platformId?: string }) =>
       bffPost<GeneratedApiKey>('/core/users/me/api-keys', {
-        description: description?.trim() || undefined,
+        description: input.description?.trim() || undefined,
+        platformId: input.platformId || undefined,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['my-api-keys'] }),
   });

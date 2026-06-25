@@ -18,6 +18,7 @@ import {
   type GeneratedApiKey,
   type LinkedWallet,
 } from '@/lib/account';
+import { useMyPlatforms } from '@/lib/platforms';
 import { fmtDate, truncateMiddle } from '@/lib/format';
 import { useHasMounted } from '@/lib/use-has-mounted';
 import { useSession } from '@/lib/session';
@@ -58,11 +59,16 @@ export default function SettingsPage() {
 
 function ApiKeysSection() {
   const keys = useMyApiKeys();
+  const platforms = useMyPlatforms();
   const create = useCreateApiKey();
   const rotate = useRotateApiKey();
   const revoke = useRevokeApiKey();
   const [description, setDescription] = useState('');
+  const [platformId, setPlatformId] = useState('');
   const [generated, setGenerated] = useState<GeneratedApiKey | null>(null);
+
+  // Keys scope to a platform. Default to the account's first platform.
+  const selectedPlatformId = platformId || platforms.data?.[0]?.id || '';
 
   const active = (keys.data ?? []).filter((k) => k.active);
 
@@ -92,14 +98,33 @@ function ApiKeysSection() {
             className="w-56 rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
           />
         </label>
+        {(platforms.data?.length ?? 0) > 0 && (
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-neutral-400">Platform</span>
+            <select
+              value={selectedPlatformId}
+              onChange={(e) => setPlatformId(e.target.value)}
+              className="w-48 rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
+            >
+              {platforms.data?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           onClick={() =>
-            create.mutate(description, {
-              onSuccess: (g) => {
-                setGenerated(g);
-                setDescription('');
+            create.mutate(
+              { description, platformId: selectedPlatformId || undefined },
+              {
+                onSuccess: (g) => {
+                  setGenerated(g);
+                  setDescription('');
+                },
               },
-            })
+            )
           }
           disabled={create.isPending}
           className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"

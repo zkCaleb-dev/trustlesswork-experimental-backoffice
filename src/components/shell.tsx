@@ -1,6 +1,6 @@
 'use client';
 
-import { LayoutGrid, LogOut, Plus, Settings, Wallet } from 'lucide-react';
+import { Building2, LayoutGrid, LogOut, Plus, Settings, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ComponentType, ReactNode } from 'react';
@@ -30,6 +30,12 @@ const NAV: {
     label: 'New escrow',
     icon: Plus,
     match: (p) => p === '/escrows/new',
+  },
+  {
+    href: '/platforms',
+    label: 'Platforms',
+    icon: Building2,
+    match: (p) => p === '/platforms' || p.startsWith('/platforms/'),
   },
   {
     href: '/settings',
