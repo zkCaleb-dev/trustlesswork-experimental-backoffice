@@ -80,11 +80,19 @@ function buildQuery(filters: EscrowFilters): string {
  * ∪ grants), resolved server-side by the core. The read-model is indexer-fed
  * and eventually consistent, so a freshly-created escrow appears shortly after.
  */
-/** Fetches the signed-in account's escrows from the BFF. */
-export function fetchEscrows(
+/** The keyset page GET /escrows returns: the rows plus the pagination cursor. */
+export interface EscrowPage {
+  data: EscrowSummary[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+/** Fetches the signed-in account's escrows (first keyset page) from the BFF. */
+export async function fetchEscrows(
   filters: EscrowFilters = {},
 ): Promise<EscrowSummary[]> {
-  return bff<EscrowSummary[]>(`/core/escrows${buildQuery(filters)}`);
+  const page = await bff<EscrowPage>(`/core/escrows${buildQuery(filters)}`);
+  return page.data;
 }
 
 export function useEscrows(filters: EscrowFilters = {}) {
